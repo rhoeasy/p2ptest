@@ -11,43 +11,66 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
-// ========== 服务端方法实现（对外提供的RPC接口） ==========
 // Join 处理其他节点的加入请求，就是把自己的peer返回给请求节点，让它自己去建立连接
 func (n *Node) Join(ctx context.Context, req *pb.JoinReq) (*pb.JoinResp, error) {
-	n.mu.Lock()
-
-	nodeID := req.NodeInfo.Id
-	logger.L().Info("[server] 收到Join请求",
-		zap.String("node_name", nodeID.Name),
-		zap.String("uuid", nodeID.Uuid),
-		zap.String("addr", fmt.Sprintf("%s:%d", req.NodeInfo.Addrs[0].Ip, req.NodeInfo.Addrs[0].Port)),
-	)
-	if _, exists := n.onlinePeers[nodeID.Uuid]; exists {
+	if req == nil || req.NodeInfo == nil || req.NodeInfo.Id == nil || len(req.NodeInfo.Addrs) == 0 {
 		return &pb.JoinResp{
 			Success: false,
 			Error: &pb.ErrorResp{
-				Code: pb.ErrorCode_ERR_NODE_EXIST,
-				Msg:  fmt.Sprintf("node %v(%v) exist", req.NodeInfo.Id.Name, nodeID.Uuid),
+				Code: pb.ErrorCode_ERR_NODE_EXIST, // 用你已有的错误码
+				Msg:  "invalid join request",
 			},
 			ProtoVersion: n.cfg.ProtoVer,
 		}, nil
 	}
 
-	// 记录节点信息
+	nodeID := req.NodeInfo.Id
+	nodeAddr := fmt.Sprintf("%s:%d", req.NodeInfo.Addrs[0].Ip, req.NodeInfo.Addrs[0].Port)
+
+	logger.L().Info("[server] 收到Join请求",
+		zap.String("node_name", nodeID.Name),
+		zap.String("uuid", nodeID.Uuid),
+		zap.String("addr", nodeAddr),
+	)
+
+	// ======================
+	// 1. 短锁：先清理【同名+同IP】的旧节点（解决脏数据）
+	// ======================
+	n.mu.Lock()
+	n.cleanOldPeerByNameAndAddrUnlocked(nodeID.Name, nodeAddr)
+	n.mu.Unlock()
+
+	// ======================
+	// 2. 短锁：判断UUID是否已存在
+	// ======================
+	n.mu.RLock()
+	_, exists := n.onlinePeers[nodeID.Uuid]
+	n.mu.RUnlock()
+
+	if exists {
+		return &pb.JoinResp{
+			Success: false,
+			Error: &pb.ErrorResp{
+				Code: pb.ErrorCode_ERR_NODE_EXIST,
+				Msg:  fmt.Sprintf("node %v(%v) exist", nodeID.Name, nodeID.Uuid),
+			},
+			ProtoVersion: n.cfg.ProtoVer,
+		}, nil
+	}
+
+	n.mu.Lock()
 	n.onlinePeers[nodeID.Uuid] = req.NodeInfo
 	n.lastActive[nodeID.Uuid] = time.Now()
 	n.mu.Unlock()
 
 	logger.L().Info("[server side] node successfully join p2p",
-		zap.String("node_name", req.NodeInfo.Id.Name),
+		zap.String("node_name", nodeID.Name),
 		zap.String("uuid", nodeID.Uuid),
 	)
 
 	peers := n.getPeerList()
 
-	// ==============================================
-	// 👇 新增：广播新节点上线给【所有已经在线的节点】
-	// ==============================================
+	// 广播新节点上线
 	go n.broadcastNodeJoin(req.NodeInfo)
 
 	// 返回成功响应
@@ -61,6 +84,36 @@ func (n *Node) Join(ctx context.Context, req *pb.JoinReq) (*pb.JoinResp, error) 
 		Peers:        peers,
 		ProtoVersion: n.cfg.ProtoVer,
 	}, nil
+}
+
+// cleanOldPeerByNameAndAddrUnlocked 清理【同名+同IP】的旧节点（解决脏数据、旧conn、旧地址映射）
+func (n *Node) cleanOldPeerByNameAndAddrUnlocked(targetName string, targetAddr string) {
+	// 遍历所有在线节点，找到同名+同地址的旧节点，删除
+	for uuid, peer := range n.onlinePeers {
+		if peer == nil || peer.Id == nil || len(peer.Addrs) == 0 {
+			continue
+		}
+
+		peerName := peer.Id.Name
+		peerAddr := fmt.Sprintf("%s:%d", peer.Addrs[0].Ip, peer.Addrs[0].Port)
+
+		// 同名 + 同地址 → 判定为旧节点，清理
+		if peerName == targetName && peerAddr == targetAddr {
+			// 1. 清理名称映射、连接、流
+			n.cleanNameAddrByUUIDUnlocked(uuid)
+			n.closePeerConnByUUIDUnlocked(uuid)
+
+			// 2. 从在线列表和活跃时间删除
+			delete(n.onlinePeers, uuid)
+			delete(n.lastActive, uuid)
+
+			logger.L().Warn("[server] 清理同名同IP旧节点",
+				zap.String("old_uuid", uuid),
+				zap.String("name", targetName),
+				zap.String("addr", targetAddr),
+			)
+		}
+	}
 }
 
 // SendHeartbeat 处理其他节点的心跳请求
