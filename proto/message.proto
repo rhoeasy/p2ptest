@@ -50,6 +50,7 @@ enum ErrorCode {
   ERR_SIGN_INVALID = 4; // 签名无效
   ERR_NETWORK = 5; // 网络错误
   ERR_VERSION = 6; // 版本不兼容
+  ERR_INVALID_ARGUMENT = 7;
 }
 
 // ========== 基础通用结构 ==========

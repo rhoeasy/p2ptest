@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
@@ -99,13 +101,8 @@ func (n *Node) cleanOldPeerByNameAndAddrUnlocked(targetName string, targetAddr s
 
 		// 同名 + 同地址 → 判定为旧节点，清理
 		if peerName == targetName && peerAddr == targetAddr {
-			// 1. 清理名称映射、连接、流
-			n.cleanNameAddrByUUIDUnlocked(uuid)
-			n.closePeerConnByUUIDUnlocked(uuid)
-
-			// 2. 从在线列表和活跃时间删除
-			delete(n.onlinePeers, uuid)
-			delete(n.lastActive, uuid)
+			// 🔥 统一清理，保证和Leave/超时清理逻辑完全一致
+			n.cleanPeerResourceUnlocked(uuid)
 
 			logger.L().Warn("[server] 清理同名同IP旧节点",
 				zap.String("old_uuid", uuid),
@@ -140,9 +137,7 @@ func (n *Node) Leave(ctx context.Context, nodeID *pb.NodeID) (*emptypb.Empty, er
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
-	delete(n.lastActive, nodeID.Uuid)
-	n.cleanNameAddrByUUIDUnlocked(nodeID.Uuid)
-	delete(n.onlinePeers, nodeID.Uuid)
+	n.cleanPeerResourceUnlocked(nodeID.Uuid)
 
 	logger.L().Info("[server] node leave",
 		zap.String("name", nodeID.Name),
@@ -193,9 +188,16 @@ func (n *Node) PeerMessageStream(stream pb.P2PPeerService_PeerMessageStreamServe
 	for {
 		msg, err := stream.Recv()
 		if err != nil {
-			// 客户端正常断开/流取消，只打日志并退出，不panic
-			logger.L().Warn("[server side] stream closed", zap.Error(err))
-			return err // 关键：出错直接退出，不继续执行
+			// 🔥 正确判断 gRPC 正常退出（Canceled），不打印 WARN
+			st, ok := status.FromError(err)
+			if ok && st.Code() == codes.Canceled {
+				// 正常退出（节点Stop、主动关闭），只打Debug，不报警告
+				logger.L().Debug("[stream] cosed successfully")
+			} else {
+				// 真正异常才打印 warn
+				logger.L().Warn("[stream] closed unexpected", zap.Error(err))
+			}
+			return err
 		}
 
 		if msg == nil { // 额外防御空指针

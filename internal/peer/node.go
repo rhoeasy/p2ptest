@@ -99,13 +99,41 @@ func (n *Node) Start() error {
 
 // Stop 停止节点
 func (n *Node) Stop() {
+	// 1. 先拿在线节点列表（读锁，快）
+	n.mu.RLock()
+	allPeers := make([]*pb.NodeInfo, 0, len(n.onlinePeers))
+	for _, p := range n.onlinePeers {
+		allPeers = append(allPeers, p)
+	}
+	n.mu.RUnlock()
+
+	// 2. 🔥 同步发 Leave（必须发完再关服务！不要 go 异步！）
+	for _, p := range allPeers {
+		if p.Id.Uuid == n.nodeID.Uuid || len(p.Addrs) == 0 {
+			continue
+		}
+		addr := fmt.Sprintf("%s:%d", p.Addrs[0].Ip, p.Addrs[0].Port)
+
+		// 同步发送，不启goroutine
+		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+		defer cancel()
+
+		// 拨号+发Leave，发完再走
+		conn, err := grpc.DialContext(ctx, addr, grpc.WithInsecure())
+		if err == nil {
+			cli := pb.NewP2PPeerServiceClient(conn)
+			_, _ = cli.Leave(ctx, n.nodeID)
+			conn.Close()
+			logger.L().Info("[exit] 同步发送Leave成功", zap.String("to", addr))
+		}
+	}
+
+	// 3. 发完 Leave 了，再关服务、清资源
 	n.cancel()
 	close(n.stopChan)
 
 	n.mu.Lock()
 	defer n.mu.Unlock()
-
-	go n.broadcastNodeLeave(n.nodeID)
 
 	// 关闭grpc服务
 	if n.grpcServer != nil {
@@ -114,15 +142,20 @@ func (n *Node) Stop() {
 	}
 
 	// 关闭所有peer连接
-	for addr, conn := range n.peerConns {
+	for _, conn := range n.peerConns {
 		conn.Close()
-		logger.L().Info("[node] close peer connection",
-			zap.String("addr", addr),
-		)
 	}
+	// 关闭流
+	for _, stream := range n.peerStreams {
+		_ = stream.CloseSend()
+	}
+
+	// 清空本地所有数据（自己本地清掉，不影响对方）
 	n.peerConns = make(map[string]*grpc.ClientConn)
+	n.peerStreams = make(map[string]pb.P2PPeerService_PeerMessageStreamClient)
 	n.onlinePeers = make(map[string]*pb.NodeInfo)
 	n.lastActive = make(map[string]time.Time)
+	n.nameToAddrs = make(map[string][]string)
 
 	logger.L().Info("[node] node stopped")
 }

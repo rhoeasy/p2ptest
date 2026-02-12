@@ -108,10 +108,7 @@ func (n *Node) cleanTimeoutPeers() {
 		last, exists := n.lastActive[uuid]
 		// 不存在活跃时间 或 超时 → 移除
 		if !exists || now.Sub(last) > types.HeartbeatTimeout {
-			n.cleanNameAddrByUUIDUnlocked(uuid)
-			n.closePeerConnByUUIDUnlocked(uuid)
-			delete(n.onlinePeers, uuid)
-			delete(n.lastActive, uuid)
+			n.cleanPeerResourceUnlocked(uuid)
 			logger.L().Warn("节点心跳超时/无活跃时间，已移除", zap.String("uuid", uuid))
 		}
 	}

@@ -226,5 +226,19 @@ func (n *Node) cleanNameAddrByUUIDUnlocked(uuid string) {
 	} else {
 		n.nameToAddrs[toDeletePeerName] = newAddrs
 	}
+}
 
+// cleanPeerResourceUnlocked 统一清理单个节点的所有资源（唯一入口，不漏任何一项）
+func (n *Node) cleanPeerResourceUnlocked(uuid string) {
+	logger.L().Info("[clean] 真正要删除的UUID", zap.String("target_uuid", uuid))
+	// 1. 清理名称→地址映射
+	n.cleanNameAddrByUUIDUnlocked(uuid)
+	// 2. 关闭并清理gRPC连接、流
+	n.closePeerConnByUUIDUnlocked(uuid)
+	// 3. 从在线列表移除
+	delete(n.onlinePeers, uuid)
+
+	logger.L().Info("[clean] 已从 onlinePeers 删除", zap.String("deleted_uuid", uuid))
+	// 4. 移除活跃时间
+	delete(n.lastActive, uuid)
 }
