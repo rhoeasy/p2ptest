@@ -9,64 +9,22 @@ import (
 	"p2ptest/internal/types"
 	"time"
 
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/connectivity"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/resolver"
-
 	pb "p2ptest/proto"
 )
 
 // JoinSeedNode send Join request to seed node and get peer list only
 func JoinSeedNode(seedAddr string, node *peer.Node) ([]*pb.NodeInfo, error) {
-	connCtx, connCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer connCancel()
-
-	rpcCtx, rpcCancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer rpcCancel()
-
-	opts := []grpc.DialOption{
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithResolvers(resolver.Get("passthrough")),
-		grpc.WithBlock(),
-	}
-
-	conn, err := grpc.NewClient(seedAddr, opts...)
+	conn, err := grpcutil.NewClientConn(context.Background(), seedAddr)
 	if err != nil {
-		return nil, fmt.Errorf("create conn to seed %s failed: %v", seedAddr, err)
+		return nil, fmt.Errorf("connect to seed %s failed: %v", seedAddr, err)
 	}
 	defer conn.Close()
 
-	log.Printf("[client-debug] connect to seed %s, current state: %s", seedAddr, conn.GetState().String())
-	conn.Connect()
+	log.Printf("[client] connected to seed %s", seedAddr)
 
-	ticker := time.NewTicker(200 * time.Millisecond)
-	defer ticker.Stop()
-
-	var connReady bool
-	for {
-		select {
-		case <-connCtx.Done():
-			return nil, fmt.Errorf("connect to seed %s timeout, state: %s, err: %v",
-				seedAddr, conn.GetState().String(), connCtx.Err())
-		case <-ticker.C:
-			state := conn.GetState()
-			log.Printf("[client-debug] polling conn state: %s", state.String())
-
-			if state == connectivity.Ready {
-				connReady = true
-				break
-			}
-			if state == connectivity.TransientFailure {
-				return nil, fmt.Errorf("connect to seed %s failed, state: TransientFailure", seedAddr)
-			}
-		}
-		if connReady {
-			break
-		}
-	}
-
-	log.Printf("[client-debug] conn to seed %s ready, call Join RPC", seedAddr)
+	// RPC 超时控制
+	rpcCtx, rpcCancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer rpcCancel()
 
 	cli := pb.NewP2PPeerServiceClient(conn)
 	joinReq := buildJoinReq(node)
