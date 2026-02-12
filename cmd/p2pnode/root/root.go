@@ -2,6 +2,8 @@ package root
 
 import (
 	"log"
+	"net/http"
+	"net/http/pprof" // 必须导入，自动注册pprof路由
 
 	"github.com/spf13/cobra"
 
@@ -43,17 +45,39 @@ func runNode(cmd *cobra.Command, args []string) {
 
 	logger.InitLogger(debug)
 
+	if debug {
+		go func() {
+			// 新建 mux，手动挂载 pprof
+			mux := http.NewServeMux()
+			// 手动注册所有 pprof 路由
+			mux.HandleFunc("/debug/pprof/", http.HandlerFunc(pprof.Index))
+			mux.HandleFunc("/debug/pprof/cmdline", http.HandlerFunc(pprof.Cmdline))
+			mux.HandleFunc("/debug/pprof/profile", http.HandlerFunc(pprof.Profile))
+			mux.HandleFunc("/debug/pprof/symbol", http.HandlerFunc(pprof.Symbol))
+			mux.HandleFunc("/debug/pprof/trace", http.HandlerFunc(pprof.Trace))
+			mux.HandleFunc("/debug/pprof/block", http.HandlerFunc(pprof.Handler("block").ServeHTTP))
+			mux.HandleFunc("/debug/pprof/goroutine", http.HandlerFunc(pprof.Handler("goroutine").ServeHTTP))
+
+			log.Println("pprof started at http://127.0.0.1:6060/debug/pprof/")
+			// 用我们自己的 mux
+			err := http.ListenAndServe("127.0.0.1:6060", mux)
+			if err != nil {
+				log.Printf("pprof failed: %v", err)
+			}
+		}()
+	}
+
 	// 1. 初始化并启动节点
 	node = peer.NewNode(cfg)
 	if err := node.Start(); err != nil {
-		log.Fatalf("[ERROR] 启动节点失败：%v", err)
+		log.Fatalf("[ERROR] start node failed: %v", err)
 	}
 	defer node.Stop()
 
 	// 2. 连接目标节点（若指定）
 	if peerIP != "" && peerPort > 0 {
 		if err := client.JoinAndConnect(node, peerIP, uint32(peerPort)); err != nil {
-			log.Printf("[WARN] 连接目标节点失败：%v", err)
+			log.Printf("[WARN] connect peer failed: %v", err)
 		}
 	}
 
@@ -64,6 +88,6 @@ func runNode(cmd *cobra.Command, args []string) {
 // Execute：对外暴露的执行入口（给main.go调用）
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
-		log.Fatalf("[ERROR] 程序执行失败：%v", err)
+		log.Fatalf("[ERROR] execute failed: %v", err)
 	}
 }

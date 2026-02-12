@@ -1,6 +1,7 @@
 package peer
 
 import (
+	"fmt"
 	"p2ptest/internal/types"
 	"time"
 
@@ -51,4 +52,16 @@ func buildNodeInfo(cfg *types.NodeConfig) *pb.NodeInfo {
 		Version:           types.DefaultNodeVer,
 		LastActive:        toPbTimestamp(),
 	}
+}
+
+func formatNodeAddr(ip string, port uint32) string {
+	return fmt.Sprintf("%s:%d", ip, port)
+}
+
+// getPeerFirstAddr 标准Go风格：返回 地址+错误
+func getPeerFirstAddr(peer *pb.NodeInfo) (string, error) {
+	if peer == nil || len(peer.Addrs) == 0 {
+		return "", types.ErrNoValidNodeAddress
+	}
+	return formatNodeAddr(peer.Addrs[0].Ip, peer.Addrs[0].Port), nil
 }

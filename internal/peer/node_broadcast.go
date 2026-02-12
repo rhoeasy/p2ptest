@@ -2,119 +2,130 @@ package peer
 
 import (
 	"context"
-	"fmt"
 	"p2ptest/internal/logger"
 	pb "p2ptest/proto"
 	"time"
 
 	"go.uber.org/zap"
-	"google.golang.org/grpc"
 )
 
-// broadcastNodeJoin 向所有在线节点广播「新节点加入」通知
+// broadcastNodeJoin 发送节点上线广播（无锁嵌套，安全）
 func (n *Node) broadcastNodeJoin(newNode *pb.NodeInfo) {
-
 	select {
 	case <-n.ctx.Done():
 		return
 	default:
 	}
 
-	// 短时间锁：只复制列表，不阻塞其他操作
+	// 1. 短读锁：只拷贝数据，立刻释放
 	n.mu.RLock()
 	allPeers := make([]*pb.NodeInfo, 0, len(n.onlinePeers))
 	for _, p := range n.onlinePeers {
 		allPeers = append(allPeers, p)
 	}
 	n.mu.RUnlock()
+	// 🔥 锁已完全释放，下面不会产生锁竞争
 
 	for _, p := range allPeers {
-
 		select {
 		case <-n.ctx.Done():
 			return
 		default:
 		}
 
-		// 跳过自己 & 刚加入的节点
-		if p.Id.Uuid == n.nodeID.Uuid || p.Id.Uuid == newNode.Id.Uuid {
+		if p.Id == nil || newNode.Id == nil {
 			continue
 		}
-		if len(p.Addrs) == 0 {
+		selfID := n.nodeID.Uuid
+		currPID := p.Id.Uuid
+		newPID := newNode.Id.Uuid
+
+		if currPID == selfID || currPID == newPID {
 			continue
 		}
 
-		addr := fmt.Sprintf("%s:%d", p.Addrs[0].Ip, p.Addrs[0].Port)
-		go n.notifySinglePeerJoinWithCtx(addr, newNode)
+		// 用统一地址函数，不手写拼接
+		addr, err := getPeerFirstAddr(p)
+		if err != nil {
+			continue
+		}
+
+		// 异步执行，不持有任何锁
+		go n.notifySinglePeerJoin(addr, newNode)
 	}
 }
 
-// notifySinglePeerJoinWithCtx 封装通知逻辑，自带 ctx 管控
-func (n *Node) notifySinglePeerJoinWithCtx(peerAddr string, newNode *pb.NodeInfo) {
-	// 🔥 从全局根 ctx 派生，节点停止自动取消
+func (n *Node) notifySinglePeerJoin(peerAddr string, newNode *pb.NodeInfo) {
+	if newNode == nil || newNode.Id == nil {
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(n.ctx, 3*time.Second)
 	defer cancel()
 
-	// 直接复用你原有逻辑
-	conn, ok := n.GetPeerConn(peerAddr)
-	if !ok {
-		dialConn, err := grpc.DialContext(ctx, peerAddr, grpc.WithInsecure())
-		if err != nil {
-			logger.L().Error("[client] dial peer failed",
-				zap.String("addr", peerAddr), zap.Error(err))
-			return
-		}
-		n.SetPeerConn(peerAddr, dialConn)
-		conn = dialConn
+	// 🔥 此时没有任何锁，GetOrCreatePeerClient 加写锁完全安全
+	cli, err := n.GetOrCreatePeerClient(ctx, peerAddr)
+	if err != nil {
+		logger.L().Error("[client] get peer client failed",
+			zap.String("addr", peerAddr), zap.Error(err))
+		return
 	}
 
-	cli := pb.NewP2PPeerServiceClient(conn)
-	_, err := cli.NotifyNodeJoin(ctx, newNode)
+	_, err = cli.NotifyNodeJoin(ctx, newNode)
 	if err != nil {
 		logger.L().Error("[client] notify node join failed",
 			zap.String("addr", peerAddr), zap.Error(err))
 		return
 	}
 
-	logger.L().Info("[client] notify peer success",
+	logger.L().Info("[client] notify node join success",
 		zap.String("to_addr", peerAddr),
-		zap.String("new_node", newNode.Id.Name))
+		zap.String("new_node_name", newNode.Id.Name))
 }
 
-// broadcastNodeLeave 广播节点下线
+// broadcastNodeLeave 发送节点下线广播（无锁嵌套，安全）
 func (n *Node) broadcastNodeLeave(nodeID *pb.NodeID) {
+	if nodeID == nil || nodeID.Uuid == "" {
+		return
+	}
+
+	// 1. 短读锁：只拷贝，立刻释放
 	n.mu.RLock()
 	allPeers := make([]*pb.NodeInfo, 0, len(n.onlinePeers))
 	for _, p := range n.onlinePeers {
 		allPeers = append(allPeers, p)
 	}
 	n.mu.RUnlock()
+	// 🔥 锁已完全释放
 
 	for _, p := range allPeers {
-		if p.Id.Uuid == n.nodeID.Uuid || p.Id.Uuid == nodeID.Uuid {
+		if p.Id == nil {
 			continue
 		}
-		if len(p.Addrs) == 0 {
-			continue
-		}
-		addr := fmt.Sprintf("%s:%d", p.Addrs[0].Ip, p.Addrs[0].Port)
+		selfID := n.nodeID.Uuid
+		targetID := nodeID.Uuid
+		currPID := p.Id.Uuid
 
-		go func(peerAddr string, leaveID *pb.NodeID) {
+		if currPID == selfID || currPID == targetID {
+			continue
+		}
+
+		addr, err := getPeerFirstAddr(p)
+		if err != nil {
+			continue
+		}
+
+		// 异步 + 无锁执行
+		go func(addr string, id *pb.NodeID) {
 			ctx, cancel := context.WithTimeout(n.ctx, 3*time.Second)
 			defer cancel()
 
-			conn, ok := n.GetPeerConn(peerAddr)
-			if !ok {
-				dialConn, err := grpc.DialContext(ctx, peerAddr, grpc.WithInsecure())
-				if err != nil {
-					return
-				}
-				n.SetPeerConn(peerAddr, dialConn)
-				conn = dialConn
+			// 无锁状态下创建client，绝对不死锁
+			cli, err := n.GetOrCreatePeerClient(ctx, addr)
+			if err != nil {
+				return
 			}
-
-			cli := pb.NewP2PPeerServiceClient(conn)
-			_, _ = cli.Leave(ctx, leaveID)
+			_, _ = cli.Leave(ctx, id)
 		}(addr, nodeID)
 	}
 }

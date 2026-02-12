@@ -23,14 +23,13 @@ type Node struct {
 	onlinePeers map[string]*pb.NodeInfo     // UUID→NodeInfo
 	peerConns   map[string]*grpc.ClientConn // addr-> grpcConn
 	peerStreams map[string]pb.P2PPeerService_PeerMessageStreamClient
-	nameToAddrs map[string][]string // 节点名称→地址映射（key=节点名称，value=地址列表，处理同名节点）
+	nameToAddrs map[string][]string // 节点名称→地址映射
 	lastActive  map[string]time.Time
 
 	mu         sync.RWMutex
 	grpcServer *grpc.Server
 	stopChan   chan struct{}
 
-	// 👇 新增：全局统一退出 ctx
 	ctx    context.Context
 	cancel context.CancelFunc
 }
@@ -38,19 +37,18 @@ type Node struct {
 func NewNode(cfg *types.NodeConfig) *Node {
 	nodeInfo := buildNodeInfo(cfg)
 
-	// 👇 新增：根上下文
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Node{
 		cfg:         cfg,
 		nodeID:      nodeInfo.Id,
 		onlinePeers: make(map[string]*pb.NodeInfo),
-		peerConns:   make(map[string]*grpc.ClientConn), // 初始化连接映射
+		peerConns:   make(map[string]*grpc.ClientConn),
 		peerStreams: make(map[string]pb.P2PPeerService_PeerMessageStreamClient),
-		nameToAddrs: make(map[string][]string), // 初始化名称映射
+		nameToAddrs: make(map[string][]string),
 		lastActive:  make(map[string]time.Time),
 
 		stopChan: make(chan struct{}),
-		ctx:      ctx, // 赋值
+		ctx:      ctx,
 		cancel:   cancel,
 	}
 }
@@ -58,19 +56,21 @@ func NewNode(cfg *types.NodeConfig) *Node {
 // ========== 节点生命周期管理 ==========
 // Start 启动节点（启动gRPC服务端）
 func (n *Node) Start() error {
-	// 1. 打印自身核心信息（启动时必打）
+	// 🔥 复用地址格式化
+	listenAddr := formatNodeAddr(n.cfg.ListenIP, n.cfg.ListenPort)
+
+	// 1. 打印自身核心信息
 	logger.L().Info("[node] self info",
 		zap.String("node_name", n.cfg.NodeName),
 		zap.String("uuid", n.nodeID.Uuid),
-		zap.String("listen_addr", fmt.Sprintf("%s:%d", n.cfg.ListenIP, n.cfg.ListenPort)),
+		zap.String("listen_addr", listenAddr),
 		zap.Uint32("proto_version", n.cfg.ProtoVer),
 	)
 
 	// 添加自身名称→地址映射
-	selfAddr := fmt.Sprintf("%s:%d", n.cfg.ListenIP, n.cfg.ListenPort)
-	n.AddNameAddrMapping(n.cfg.NodeName, selfAddr)
+	n.AddNameAddrMapping(n.cfg.NodeName, listenAddr)
+
 	// 2. 启动gRPC服务
-	listenAddr := fmt.Sprintf("%s:%d", n.cfg.ListenIP, n.cfg.ListenPort)
 	lis, err := net.Listen("tcp", listenAddr)
 	if err != nil {
 		return fmt.Errorf("failed to listen %v, err: %v", listenAddr, err)
@@ -85,21 +85,21 @@ func (n *Node) Start() error {
 			logger.L().Fatal("[node] failed to serve", zap.Error(err))
 		}
 	}()
-	// 👇 全局唯一、只启动一次！
-	// 再也没有第二个地方能启动心跳和清理
+
+	// 启动后台任务
 	n.startPeerCleaner()
 	n.startHeartbeatLoop()
 
 	logger.L().Info("[node] start successfully",
 		zap.String("node_name", n.cfg.NodeName),
-		zap.String("listen_addr", fmt.Sprintf("%s:%d", n.cfg.ListenIP, n.cfg.ListenPort)),
+		zap.String("listen_addr", listenAddr),
 	)
 	return nil
 }
 
 // Stop 停止节点
 func (n *Node) Stop() {
-	// 1. 先拿在线节点列表（读锁，快）
+	// 1. 先拿在线节点列表（读锁）
 	n.mu.RLock()
 	allPeers := make([]*pb.NodeInfo, 0, len(n.onlinePeers))
 	for _, p := range n.onlinePeers {
@@ -107,18 +107,22 @@ func (n *Node) Stop() {
 	}
 	n.mu.RUnlock()
 
-	// 2. 🔥 同步发 Leave（必须发完再关服务！不要 go 异步！）
+	// 2. 同步发送 Leave 通知
 	for _, p := range allPeers {
-		if p.Id.Uuid == n.nodeID.Uuid || len(p.Addrs) == 0 {
+		if p.Id.Uuid == n.nodeID.Uuid {
 			continue
 		}
-		addr := fmt.Sprintf("%s:%d", p.Addrs[0].Ip, p.Addrs[0].Port)
 
-		// 同步发送，不启goroutine
+		// 🔥 复用工具函数获取地址
+		addr, err := getPeerFirstAddr(p)
+		if err != nil {
+			continue
+		}
+
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 		defer cancel()
 
-		// 拨号+发Leave，发完再走
+		// 拨号并发送Leave
 		conn, err := grpc.DialContext(ctx, addr, grpc.WithInsecure())
 		if err == nil {
 			cli := pb.NewP2PPeerServiceClient(conn)
@@ -128,7 +132,7 @@ func (n *Node) Stop() {
 		}
 	}
 
-	// 3. 发完 Leave 了，再关服务、清资源
+	// 3. 关闭全局上下文与通道
 	n.cancel()
 	close(n.stopChan)
 
@@ -150,7 +154,7 @@ func (n *Node) Stop() {
 		_ = stream.CloseSend()
 	}
 
-	// 清空本地所有数据（自己本地清掉，不影响对方）
+	// 清空本地所有数据
 	n.peerConns = make(map[string]*grpc.ClientConn)
 	n.peerStreams = make(map[string]pb.P2PPeerService_PeerMessageStreamClient)
 	n.onlinePeers = make(map[string]*pb.NodeInfo)
@@ -165,19 +169,19 @@ func (n *Node) GetNodeID() *pb.NodeID {
 	return n.nodeID
 }
 
-// GetPeerStreams 获取双向流映射（给客户端模块用）
+// GetPeerStreams 获取双向流映射
 func (n *Node) GetPeerStreams() map[string]pb.P2PPeerService_PeerMessageStreamClient {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 	return n.peerStreams
 }
 
-// Cfg 获取节点配置（给客户端模块用）
+// Cfg 获取节点配置
 func (n *Node) Cfg() *types.NodeConfig {
 	return n.cfg
 }
 
-// ToPbTimestamp 暴露给client包使用（语义化导出）
+// ToPbTimestamp 暴露给client包使用
 func ToPbTimestamp() *timestamppb.Timestamp {
 	return toPbTimestamp()
 }

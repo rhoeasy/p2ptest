@@ -10,105 +10,123 @@ import (
 	"go.uber.org/zap"
 )
 
-// AddOnlinePeer 主动添加在线节点到本地列表（线程安全）
+// AddOnlinePeer 主动添加/更新在线节点到本地列表（线程安全）
 func (n *Node) AddOnlinePeer(peerInfo *pb.NodeInfo) {
 	if peerInfo == nil || peerInfo.Id == nil || peerInfo.Id.Uuid == "" {
-		logger.L().Warn("[client] invalid peer info, skip add")
+		logger.L().Warn("[peer] invalid peer info, skip add")
 		return
 	}
 
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
-	// 跳过自己
+	// 跳过自身
 	if peerInfo.Id.Uuid == n.nodeID.Uuid {
 		return
 	}
 
-	// 核心修复：已存在则更新，不再重复添加
-	if _, exists := n.onlinePeers[peerInfo.Id.Uuid]; exists {
-		n.onlinePeers[peerInfo.Id.Uuid] = peerInfo // 更新最新信息
-		n.lastActive[peerInfo.Id.Uuid] = time.Now()
-		logger.L().Info("[client] update peer in local online list",
-			zap.String("node_name", peerInfo.Id.Name),
-			zap.String("uuid", peerInfo.Id.Uuid))
+	uuid := peerInfo.Id.Uuid
+	exists := n.onlinePeers[uuid] != nil
+
+	// 存在则更新，不存在则新增
+	n.onlinePeers[uuid] = peerInfo
+	n.lastActive[uuid] = time.Now()
+
+	if exists {
+		logger.L().Info("[peer] update online peer",
+			zap.String("name", peerInfo.Id.Name),
+			zap.String("uuid", uuid))
 		return
 	}
 
-	// 不存在则新增
-	n.onlinePeers[peerInfo.Id.Uuid] = peerInfo
-	n.lastActive[peerInfo.Id.Uuid] = time.Now()
-	logger.L().Info("[client] add peer to local online list",
-		zap.String("node_name", peerInfo.Id.Name),
-		zap.String("uuid", peerInfo.Id.Uuid),
-		zap.String("addr", fmt.Sprintf("%s:%d", peerInfo.Addrs[0].Ip, peerInfo.Addrs[0].Port)),
-	)
-
-	// 同步更新名称映射（取第一个有效地址）
-	if len(peerInfo.Addrs) > 0 {
-		addr := fmt.Sprintf("%s:%d", peerInfo.Addrs[0].Ip, peerInfo.Addrs[0].Port)
-		n.addNameAddrMappingUnlocked(peerInfo.Id.Name, addr) // 调用映射添加方法
+	addr, err := getPeerFirstAddr(peerInfo)
+	if err == nil {
+		n.addNameAddrMappingUnlocked(peerInfo.Id.Name, addr)
 	}
+
+	logger.L().Info("[peer] add online peer",
+		zap.String("name", peerInfo.Id.Name),
+		zap.String("uuid", uuid),
+		zap.String("addr", addr)) // err 不为空时 addr 为空字符串，正常打印
 }
 
-// GetOnlinePeers 获取所有在线节点（包含自己），返回格式化的节点信息列表
+// GetOnlinePeers 获取所有在线节点（包含自身），用于控制台展示
 func (n *Node) GetOnlinePeers() []map[string]string {
 	n.mu.RLock()
-	defer n.mu.RUnlock()
+	copyPeers := make(map[string]*pb.NodeInfo, len(n.onlinePeers))
+	for k, v := range n.onlinePeers {
+		copyPeers[k] = v
+	}
+	selfUUID := n.nodeID.Uuid
+	selfCfg := n.cfg
+	n.mu.RUnlock()
 
-	peersInfo := make([]map[string]string, 0)
+	var peersInfo []map[string]string
 
-	// 1. 先添加自己的信息
-	selfInfo := map[string]string{
-		"节点名称": n.cfg.NodeName,
-		"UUID": n.nodeID.Uuid,
-		"监听地址": fmt.Sprintf("%s:%d", n.cfg.ListenIP, n.cfg.ListenPort),
+	// 加入自身节点
+	selfAddr := formatNodeAddr(selfCfg.ListenIP, selfCfg.ListenPort)
+	peersInfo = append(peersInfo, map[string]string{
+		"节点名称": selfCfg.NodeName,
+		"UUID": selfUUID,
+		"监听地址": selfAddr,
 		"节点类型": "本地节点（自身）",
 		"状态":   "在线（ONLINE）",
-	}
-	peersInfo = append(peersInfo, selfInfo)
+	})
 
-	// 2. 再添加其他在线节点
-	for uuid, peer := range n.onlinePeers {
-		// 跳过自己（避免重复）
-		if uuid == n.nodeID.Uuid {
+	// 遍历拷贝后的map，不持有锁
+	for uuid, peer := range copyPeers {
+		if uuid == selfUUID {
 			continue
 		}
-		// 取第一个有效地址
-		peerAddr := "无有效地址"
-		if len(peer.Addrs) > 0 {
-			peerAddr = fmt.Sprintf("%s:%d", peer.Addrs[0].Ip, peer.Addrs[0].Port)
+
+		addr, err := getPeerFirstAddr(peer)
+		if err != nil {
+			addr = ""
 		}
-		peerInfo := map[string]string{
+
+		peersInfo = append(peersInfo, map[string]string{
 			"节点名称": peer.Id.Name,
 			"UUID": uuid,
-			"监听地址": peerAddr,
+			"监听地址": addr,
 			"节点类型": "远程节点（Peer）",
 			"状态":   pb.NodeStatus_name[int32(peer.Status)],
-		}
-		peersInfo = append(peersInfo, peerInfo)
+		})
 	}
 
 	return peersInfo
 }
 
+// getPeerList 获取节点列表（用于Join接口返回，服务端内部使用）
 func (n *Node) getPeerList() []*pb.NodeInfo {
-	// 1. 初始化列表，先加自己（seed）
+	// 🔥 短读锁：只拷贝，立刻释放，绝不占锁
+	n.mu.RLock()
+	// 拷贝在线节点，避免遍历原map
+	copyPeers := make(map[string]*pb.NodeInfo, len(n.onlinePeers))
+	for k, v := range n.onlinePeers {
+		copyPeers[k] = v
+	}
+	// 拷贝自身信息
+	selfName := n.cfg.NodeName
+	selfUUID := n.nodeID.Uuid
+	selfIP := n.cfg.ListenIP
+	selfPort := n.cfg.ListenPort
+	n.mu.RUnlock()
+	// 🔥 锁已释放，下面随便写逻辑
+
+	selfAddr := formatNodeAddr(selfIP, selfPort)
 	peerList := []*pb.NodeInfo{
 		{
 			Id: &pb.NodeID{
-				Name: n.cfg.NodeName, // seed
-				Uuid: n.nodeID.Uuid,  // seed的唯一UUID
+				Name: selfName,
+				Uuid: selfUUID,
 			},
-			Addrs: []*pb.NodeAddr{
-				{
-					Ip:       n.cfg.ListenIP,   // 127.0.0.1
-					Port:     n.cfg.ListenPort, // 50051
-					NatType:  pb.NatType_NAT_UNKNOWN,
-					IsPublic: true,
-					Protocol: "tcp",
-				},
-			},
+			Addrs: []*pb.NodeAddr{{
+				Ip:       selfIP,
+				Port:     selfPort,
+				NatType:  pb.NatType_NAT_UNKNOWN,
+				IsPublic: true,
+				Protocol: "tcp",
+			}},
 			Status:            pb.NodeStatus_NODE_STATUS_ONLINE,
 			HeartbeatInterval: types.HeartbeatInterval,
 			Version:           types.DefaultNodeVer,
@@ -116,129 +134,111 @@ func (n *Node) getPeerList() []*pb.NodeInfo {
 		},
 	}
 
-	// 2. 打印自身信息（确认seed自己被加入列表）
-	logger.L().Info("[server] getPeerList - 自身信息",
-		zap.String("name", n.cfg.NodeName),
-		zap.String("uuid", n.nodeID.Uuid),
-		zap.String("addr", fmt.Sprintf("%s:%d", n.cfg.ListenIP, n.cfg.ListenPort)),
-	)
+	logger.L().Info("[server] self info in peer list",
+		zap.String("name", selfName),
+		zap.String("uuid", selfUUID),
+		zap.String("addr", selfAddr))
 
-	// 3. 再加其他在线节点（node2）
-	n.mu.RLock()
-	defer n.mu.RUnlock()
-	for uuid, peer := range n.onlinePeers {
-		// 跳过自己（防止重复）
-		if uuid == n.nodeID.Uuid {
+	// 遍历拷贝的map，不加锁
+	for uuid, peer := range copyPeers {
+		if uuid == selfUUID {
 			continue
 		}
 		peerList = append(peerList, peer)
-		logger.L().Info("[server] getPeerList - 新增在线节点",
+		logger.L().Info("[server] add peer to list",
 			zap.String("name", peer.Id.Name),
-			zap.String("uuid", uuid),
-		)
+			zap.String("uuid", uuid))
 	}
 
-	// 4. 打印最终返回的列表（关键排查）
-	logger.L().Info("[server] getPeerList - 最终返回Peer数量",
-		zap.Int("count", len(peerList)),
-	)
-	for i, p := range peerList {
-		logger.L().Info("[server] getPeerList - Peer详情",
-			zap.Int("index", i+1),
-			zap.String("name", p.Id.Name),
-			zap.String("uuid", p.Id.Uuid),
-			zap.String("addr", fmt.Sprintf("%s:%d", p.Addrs[0].Ip, p.Addrs[0].Port)),
-		)
-	}
-
+	logger.L().Info("[server] total peers in list", zap.Int("count", len(peerList)))
 	return peerList
 }
 
-// AddNameAddrMapping 外部调用的加锁版本
+// AddNameAddrMapping 对外：添加节点名称→地址映射（线程安全）
 func (n *Node) AddNameAddrMapping(nodeName string, addr string) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	n.addNameAddrMappingUnlocked(nodeName, addr) // 调用无锁内部方法
+	n.addNameAddrMappingUnlocked(nodeName, addr)
 }
 
-// addNameAddrMappingUnlocked 内部无锁版本（仅在已加锁时调用）
+// addNameAddrMappingUnlocked 内部无锁：维护名称-地址映射（去重）
 func (n *Node) addNameAddrMappingUnlocked(nodeName string, addr string) {
-	// 去重：避免同一名称重复添加同一地址
-	for _, existingAddr := range n.nameToAddrs[nodeName] {
-		if existingAddr == addr {
+	for _, existing := range n.nameToAddrs[nodeName] {
+		if existing == addr {
 			return
 		}
 	}
 	n.nameToAddrs[nodeName] = append(n.nameToAddrs[nodeName], addr)
-	logger.L().Info("新增节点名称映射",
-		zap.String("node_name", nodeName),
-		zap.String("addr", addr),
-	)
+	logger.L().Info("[peer] add name-addr mapping",
+		zap.String("name", nodeName),
+		zap.String("addr", addr))
 }
 
-// GetAddrByName 根据节点名称查找地址（返回第一个可用地址，处理同名）
+// GetAddrByName 按节点名查地址（自动处理同名节点）
 func (n *Node) GetAddrByName(nodeName string) (string, error) {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 
-	// 1. 先查名称映射
 	addrs, exists := n.nameToAddrs[nodeName]
 	if !exists || len(addrs) == 0 {
-		return "", fmt.Errorf("未找到节点名称「%s」对应的地址", nodeName)
+		return "", fmt.Errorf("node name [%s] not found", nodeName)
 	}
 
-	// 2. 同名节点处理：返回第一个地址，同时提示
+	// 同名节点：使用第一个地址
 	if len(addrs) > 1 {
-		logger.L().Warn("找到多个同名节点，使用第一个地址",
-			zap.String("node_name", nodeName),
+		logger.L().Warn("[peer] multiple nodes with same name, use first",
+			zap.String("name", nodeName),
 			zap.String("use_addr", addrs[0]),
-			zap.Strings("all_addrs", addrs),
-		)
+			zap.Strings("all_addrs", addrs))
 	}
+
 	return addrs[0], nil
 }
 
+// cleanNameAddrByUUIDUnlocked 无锁：按UUID清理名称映射
 func (n *Node) cleanNameAddrByUUIDUnlocked(uuid string) {
-	toDeletePeer, ok := n.onlinePeers[uuid]
+	peer, ok := n.onlinePeers[uuid]
 	if !ok {
 		return
 	}
-	toDeletePeerName := toDeletePeer.Id.Name
-	toDeletePeerAddrs := n.nameToAddrs[toDeletePeerName]
 
-	newAddrs := make([]string, 0, len(toDeletePeerAddrs))
-	for _, addr := range toDeletePeerAddrs {
-		// 保留不是该节点的地址
-		isThisNode := false
-		for _, a := range toDeletePeer.Addrs {
-			if fmt.Sprintf("%s:%d", a.Ip, a.Port) == addr {
-				isThisNode = true
+	name := peer.Id.Name
+	oldAddrs := n.nameToAddrs[name]
+	var newAddrs []string
+
+	for _, addr := range oldAddrs {
+		keep := true
+		for _, a := range peer.Addrs {
+			if formatNodeAddr(a.Ip, a.Port) == addr {
+				keep = false
 				break
 			}
 		}
-		if !isThisNode {
+		if keep {
 			newAddrs = append(newAddrs, addr)
 		}
 	}
 
 	if len(newAddrs) == 0 {
-		delete(n.nameToAddrs, toDeletePeerName)
+		delete(n.nameToAddrs, name)
 	} else {
-		n.nameToAddrs[toDeletePeerName] = newAddrs
+		n.nameToAddrs[name] = newAddrs
 	}
 }
 
-// cleanPeerResourceUnlocked 统一清理单个节点的所有资源（唯一入口，不漏任何一项）
+// cleanPeerResourceUnlocked 【全局唯一入口】清理节点所有资源
 func (n *Node) cleanPeerResourceUnlocked(uuid string) {
-	logger.L().Info("[clean] 真正要删除的UUID", zap.String("target_uuid", uuid))
-	// 1. 清理名称→地址映射
-	n.cleanNameAddrByUUIDUnlocked(uuid)
-	// 2. 关闭并清理gRPC连接、流
-	n.closePeerConnByUUIDUnlocked(uuid)
-	// 3. 从在线列表移除
-	delete(n.onlinePeers, uuid)
+	logger.L().Info("[clean] start clean peer resource", zap.String("uuid", uuid))
 
-	logger.L().Info("[clean] 已从 onlinePeers 删除", zap.String("deleted_uuid", uuid))
-	// 4. 移除活跃时间
+	// 1. 清理名称映射
+	n.cleanNameAddrByUUIDUnlocked(uuid)
+	// 2. 关闭gRPC连接与流
+	n.closePeerConnByUUIDUnlocked(uuid)
+
+	delete(n.onlinePeers, uuid)
 	delete(n.lastActive, uuid)
+	delete(n.peerConns, uuid)
+	delete(n.peerStreams, uuid)
+
+	logger.L().Info("[clean] finish clean peer resource", zap.String("uuid", uuid))
 }

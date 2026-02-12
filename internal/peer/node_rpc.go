@@ -13,13 +13,15 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
-// Join 处理其他节点的加入请求，就是把自己的peer返回给请求节点，让它自己去建立连接
+// ====================== 服务端 API 实现 ======================
+
+// Join 处理其他节点的加入请求，返回自身节点列表
 func (n *Node) Join(ctx context.Context, req *pb.JoinReq) (*pb.JoinResp, error) {
-	if req == nil || req.NodeInfo == nil || req.NodeInfo.Id == nil || len(req.NodeInfo.Addrs) == 0 {
+	if req == nil || req.NodeInfo == nil || req.NodeInfo.Id == nil {
 		return &pb.JoinResp{
 			Success: false,
 			Error: &pb.ErrorResp{
-				Code: pb.ErrorCode_ERR_NODE_EXIST, // 用你已有的错误码
+				Code: pb.ErrorCode_ERR_NODE_EXIST,
 				Msg:  "invalid join request",
 			},
 			ProtoVersion: n.cfg.ProtoVer,
@@ -27,7 +29,14 @@ func (n *Node) Join(ctx context.Context, req *pb.JoinReq) (*pb.JoinResp, error) 
 	}
 
 	nodeID := req.NodeInfo.Id
-	nodeAddr := fmt.Sprintf("%s:%d", req.NodeInfo.Addrs[0].Ip, req.NodeInfo.Addrs[0].Port)
+	nodeAddr, err := getPeerFirstAddr(req.NodeInfo)
+	// 无地址也允许Join（只打日志）
+	if err != nil {
+		logger.L().Info("[server] 节点无有效地址",
+			zap.String("node_name", nodeID.Name),
+			zap.String("uuid", nodeID.Uuid),
+		)
+	}
 
 	logger.L().Info("[server] 收到Join请求",
 		zap.String("node_name", nodeID.Name),
@@ -35,16 +44,12 @@ func (n *Node) Join(ctx context.Context, req *pb.JoinReq) (*pb.JoinResp, error) 
 		zap.String("addr", nodeAddr),
 	)
 
-	// ======================
-	// 1. 短锁：先清理【同名+同IP】的旧节点（解决脏数据）
-	// ======================
+	// 1. 短锁：清理同名+同IP旧节点
 	n.mu.Lock()
 	n.cleanOldPeerByNameAndAddrUnlocked(nodeID.Name, nodeAddr)
 	n.mu.Unlock()
 
-	// ======================
 	// 2. 短锁：判断UUID是否已存在
-	// ======================
 	n.mu.RLock()
 	_, exists := n.onlinePeers[nodeID.Uuid]
 	n.mu.RUnlock()
@@ -60,22 +65,22 @@ func (n *Node) Join(ctx context.Context, req *pb.JoinReq) (*pb.JoinResp, error) 
 		}, nil
 	}
 
+	// 3. 添加新节点
 	n.mu.Lock()
 	n.onlinePeers[nodeID.Uuid] = req.NodeInfo
 	n.lastActive[nodeID.Uuid] = time.Now()
 	n.mu.Unlock()
 
-	logger.L().Info("[server side] node successfully join p2p",
+	logger.L().Info("[server] 节点加入成功",
 		zap.String("node_name", nodeID.Name),
 		zap.String("uuid", nodeID.Uuid),
 	)
 
+	// 4. 获取节点列表并广播
 	peers := n.getPeerList()
-
-	// 广播新节点上线
 	go n.broadcastNodeJoin(req.NodeInfo)
 
-	// 返回成功响应
+	// 5. 返回响应
 	return &pb.JoinResp{
 		Success: true,
 		Error: &pb.ErrorResp{
@@ -88,22 +93,22 @@ func (n *Node) Join(ctx context.Context, req *pb.JoinReq) (*pb.JoinResp, error) 
 	}, nil
 }
 
-// cleanOldPeerByNameAndAddrUnlocked 清理【同名+同IP】的旧节点（解决脏数据、旧conn、旧地址映射）
+// cleanOldPeerByNameAndAddrUnlocked 清理同名+同IP旧节点（无锁）
 func (n *Node) cleanOldPeerByNameAndAddrUnlocked(targetName string, targetAddr string) {
-	// 遍历所有在线节点，找到同名+同地址的旧节点，删除
 	for uuid, peer := range n.onlinePeers {
-		if peer == nil || peer.Id == nil || len(peer.Addrs) == 0 {
+		if peer == nil || peer.Id == nil {
 			continue
 		}
 
 		peerName := peer.Id.Name
-		peerAddr := fmt.Sprintf("%s:%d", peer.Addrs[0].Ip, peer.Addrs[0].Port)
+		peerAddr, err := getPeerFirstAddr(peer)
+		if err != nil {
+			continue
+		}
 
-		// 同名 + 同地址 → 判定为旧节点，清理
+		// 同名+同地址 → 清理旧节点
 		if peerName == targetName && peerAddr == targetAddr {
-			// 🔥 统一清理，保证和Leave/超时清理逻辑完全一致
 			n.cleanPeerResourceUnlocked(uuid)
-
 			logger.L().Warn("[server] 清理同名同IP旧节点",
 				zap.String("old_uuid", uuid),
 				zap.String("name", targetName),
@@ -120,26 +125,28 @@ func (n *Node) SendHeartbeat(ctx context.Context, req *pb.HeartbeatReq) (*emptyp
 
 	if _, exists := n.onlinePeers[req.NodeId.Uuid]; exists {
 		n.lastActive[req.NodeId.Uuid] = time.Now()
-		logger.L().Debug("[server side] recv hb",
+		logger.L().Debug("[server] 收到心跳",
 			zap.String("node", req.NodeId.Name),
 			zap.String("status", req.Status.String()),
 		)
 	}
-	// TODO 太久没心跳的自动断开连接，再加入重连队列
 
 	return &emptypb.Empty{}, nil
 }
 
+// Leave 处理节点主动离开
 func (n *Node) Leave(ctx context.Context, nodeID *pb.NodeID) (*emptypb.Empty, error) {
-	if nodeID == nil || len(nodeID.Uuid) == 0 {
+	if nodeID == nil || nodeID.Uuid == "" {
 		return &emptypb.Empty{}, nil
 	}
+
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
+	// 统一清理入口
 	n.cleanPeerResourceUnlocked(nodeID.Uuid)
 
-	logger.L().Info("[server] node leave",
+	logger.L().Info("[server] 节点离开",
 		zap.String("name", nodeID.Name),
 		zap.String("uuid", nodeID.Uuid),
 	)
@@ -147,35 +154,37 @@ func (n *Node) Leave(ctx context.Context, nodeID *pb.NodeID) (*emptypb.Empty, er
 	return &emptypb.Empty{}, nil
 }
 
+// NotifyNodeJoin 处理新节点上线通知
 func (n *Node) NotifyNodeJoin(ctx context.Context, newPeer *pb.NodeInfo) (*emptypb.Empty, error) {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-
 	if newPeer == nil || newPeer.Id == nil || newPeer.Id.Uuid == "" {
 		return &emptypb.Empty{}, nil
 	}
 
-	// 跳过自己
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	// 跳过自身
 	if newPeer.Id.Uuid == n.nodeID.Uuid {
 		return &emptypb.Empty{}, nil
 	}
 
-	// 核心修复：已存在则更新活跃时间，不再重复添加
+	// 已存在则更新活跃时间
 	if _, exists := n.onlinePeers[newPeer.Id.Uuid]; exists {
 		n.lastActive[newPeer.Id.Uuid] = time.Now()
 		return &emptypb.Empty{}, nil
 	}
 
-	// 更新本地在线节点列表
+	// 添加新节点
 	n.onlinePeers[newPeer.Id.Uuid] = newPeer
 	n.lastActive[newPeer.Id.Uuid] = time.Now()
 
-	// 👇【关键修复】同步更新【节点名称→地址】映射表
-	if len(newPeer.Addrs) > 0 {
-		addr := fmt.Sprintf("%s:%d", newPeer.Addrs[0].Ip, newPeer.Addrs[0].Port)
+	// ✅ 正确判断：用 error 代替魔法字符串
+	addr, err := getPeerFirstAddr(newPeer)
+	if err == nil { // 只有地址合法时，才加映射
 		n.addNameAddrMappingUnlocked(newPeer.Id.Name, addr)
 	}
-	logger.L().Info("[server] notified new node join",
+
+	logger.L().Info("[server] 收到新节点上线通知",
 		zap.String("node_name", newPeer.Id.Name),
 		zap.String("uuid", newPeer.Id.Uuid),
 	)
@@ -188,28 +197,28 @@ func (n *Node) PeerMessageStream(stream pb.P2PPeerService_PeerMessageStreamServe
 	for {
 		msg, err := stream.Recv()
 		if err != nil {
-			// 🔥 正确判断 gRPC 正常退出（Canceled），不打印 WARN
+			// 正常关闭不打印警告
 			st, ok := status.FromError(err)
 			if ok && st.Code() == codes.Canceled {
-				// 正常退出（节点Stop、主动关闭），只打Debug，不报警告
-				logger.L().Debug("[stream] cosed successfully")
+				logger.L().Debug("[stream] 流正常关闭")
 			} else {
-				// 真正异常才打印 warn
-				logger.L().Warn("[stream] closed unexpected", zap.Error(err))
+				logger.L().Warn("[stream] 流异常关闭", zap.Error(err))
 			}
 			return err
 		}
 
-		if msg == nil { // 额外防御空指针
+		if msg == nil {
 			continue
 		}
 
+		// 处理文本消息
 		if msg.Type == pb.MessageType_MSG_TEXT {
 			content := msg.GetText()
-			logger.L().Info("[server side] recv msg",
+			logger.L().Info("[server] 收到消息",
 				zap.String("from", msg.From.Name),
 				zap.String("content", content),
 			)
+
 			// 构造回复
 			reply := &pb.P2PMessage{
 				MsgId:        genMsgID(),
@@ -225,7 +234,7 @@ func (n *Node) PeerMessageStream(stream pb.P2PPeerService_PeerMessageStreamServe
 			}
 
 			if err := stream.Send(reply); err != nil {
-				logger.L().Error("[server side] reply failed", zap.Error(err))
+				logger.L().Error("[server] 回复消息失败", zap.Error(err))
 				return err
 			}
 		}
