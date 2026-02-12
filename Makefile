@@ -44,5 +44,15 @@ run-node3: build
 	@echo "启动node3节点（端口50053，连接种子节点）..."
 	$(BIN_DIR)/$(APP_NAME) -n node3 -i 127.0.0.1 -p 50053 --peer-ip 127.0.0.1 --peer-port 50051
 
+# 单元测试
+test:
+	@echo "运行单元测试..."
+	go test -v ./internal/...
+
+# 🔥 竞态条件检测（Race Condition Test）
+test-race:
+	@echo "运行竞态条件检测（race detector）..."
+	go test -race -v ./internal/...
+
 # 伪目标（避免和同名文件冲突）
-.PHONY: all proto build clean
+.PHONY: all proto build clean run-seed run-node2 run-node3 test test-race
