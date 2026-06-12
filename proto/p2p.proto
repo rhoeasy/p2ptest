@@ -1,0 +1,152 @@
+syntax = "proto3";
+
+package p2p;
+
+option go_package = "./proto/p2p/p2p";
+
+// ============================================================
+// 共享内核（Shared Kernel）- 值对象
+// ============================================================
+
+message NodeID {
+  string uuid = 1;
+  string name = 2;
+}
+
+message NodeAddr {
+  string ip = 1;
+  uint32 port = 2;
+}
+
+enum NodeStatus {
+  UNKNOWN = 0;
+  ONLINE = 1;
+  BUSY = 2;
+  OFFLINE = 3;
+}
+
+// 节点完整信息 - 值对象
+message NodeInfo {
+  NodeID id = 1;
+  repeated NodeAddr addrs = 2;
+  NodeStatus status = 3;
+  uint64 last_seen = 4;
+}
+
+// ============================================================
+// 限界上下文 1: Discovery（节点发现）
+// 职责：网络拓扑查询，不涉及成员关系变更
+// ============================================================
+
+service Discovery {
+  // 获取已知节点列表（用于新节点快速发现网络拓扑）
+  rpc GetPeers(GetPeersReq) returns (GetPeersResp);
+  
+  // 按 ID 查找特定节点
+  rpc FindNode(FindNodeReq) returns (FindNodeResp);
+}
+
+message GetPeersReq {
+  uint32 limit = 1;
+}
+
+message GetPeersResp {
+  repeated NodeInfo peers = 1;
+}
+
+message FindNodeReq {
+  NodeID target = 1;
+}
+
+message FindNodeResp {
+  NodeInfo node = 1;
+  bool found = 2;
+}
+
+// ============================================================
+// 限界上下文 2: Membership（成员管理）
+// 职责：建立/维护/终止节点间的对等关系
+// 关键洞察：用 Handshake 替代 Join，语义从"我加入你"变为"我们建立对等关系"
+// ============================================================
+
+service Membership {
+  // 握手：双向确认，建立对等关系
+  // 发起方发送自己的 NodeInfo，接收方决定是否接受
+  // 若接受，返回自己的 NodeInfo + 已知节点列表（一次握手完成发现和成员建立）
+  rpc Handshake(HandshakeReq) returns (HandshakeResp);
+  
+  // 心跳：维持成员资格，确认双方仍然存活
+  rpc Heartbeat(HeartbeatReq) returns (HeartbeatResp);
+  
+  // 断开：优雅终止对等关系
+  // 语义清晰："我要断开与你的连接"，而不是模糊的"Leave"
+  rpc Disconnect(DisconnectReq) returns (DisconnectResp);
+}
+
+message HandshakeReq {
+  NodeInfo self = 1;
+  uint32 proto_version = 2;
+}
+
+message HandshakeResp {
+  NodeInfo peer = 1;              // 对方的完整信息
+  repeated NodeInfo known_peers = 2;  // 对方已知的其他节点（替代 NotifyNodeJoin！）
+  bool accepted = 3;
+  string reject_reason = 4;
+}
+
+message HeartbeatReq {
+  NodeID node_id = 1;
+  uint64 timestamp = 2;
+}
+
+message HeartbeatResp {
+  NodeStatus status = 1;
+  uint64 timestamp = 2;
+}
+
+message DisconnectReq {
+  NodeID node_id = 1;
+  string reason = 2;
+}
+
+message DisconnectResp {
+  bool acknowledged = 1;
+}
+
+// ============================================================
+// 限界上下文 3: Messaging（消息传递）
+// 职责：业务消息的路由和传输
+// ============================================================
+
+service Messaging {
+  // 双向流：传递业务消息
+  // Envelope 作为统一信封，内部包含不同类型的 payload
+  rpc Stream(stream Envelope) returns (stream Envelope);
+}
+
+message Envelope {
+  string msg_id = 1;
+  NodeID from = 2;
+  oneof payload {
+    TextMessage text = 3;
+    FileChunk file = 4;
+    Ping ping = 5;
+  }
+  uint64 timestamp = 6;
+}
+
+message TextMessage {
+  string content = 1;
+}
+
+message FileChunk {
+  string file_id = 1;
+  bytes data = 2;
+  uint32 index = 3;
+  bool is_last = 4;
+}
+
+message Ping {
+  bytes nonce = 1;
+}
