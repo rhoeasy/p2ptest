@@ -21,6 +21,9 @@
 *.pprof
 profile.out
 
+# Go 测试覆盖率报告
+coverage.out
+
 # 依赖目录
 /vendor/
 /Gopkg.lock
@@ -41,6 +44,9 @@ log/
 .vscode/
 *.swp
 *.swo
+
+# OpenCode 内部目录
+.omo/
 
 # 系统文件
 .DS_Store
