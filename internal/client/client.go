@@ -3,64 +3,66 @@ package client
 import (
 	"context"
 	"fmt"
-	"log"
-	"p2ptest/internal/grpcutil"
-	"p2ptest/internal/peer"
-	"p2ptest/internal/types"
 	"time"
 
-	pb "p2ptest/proto"
+	"p2ptest/internal/grpcutil"
+	"p2ptest/internal/logger"
+	pb "p2ptest/proto/p2p"
+
+	"go.uber.org/zap"
 )
 
-// JoinSeedNode send Join request to seed node and get peer list only
-func JoinSeedNode(seedAddr string, node *peer.Node) ([]*pb.NodeInfo, error) {
+// HandshakeSeedNode 与种子节点握手并获取已知节点列表。
+func HandshakeSeedNode(seedAddr string, n PeerNode) ([]*pb.NodeInfo, error) {
 	conn, err := grpcutil.NewClientConn(context.Background(), seedAddr)
 	if err != nil {
-		return nil, fmt.Errorf("connect to seed %s failed: %v", seedAddr, err)
+		return nil, fmt.Errorf("connect to seed %s failed: %w", seedAddr, err)
 	}
 	defer conn.Close()
 
-	log.Printf("[client] connected to seed %s", seedAddr)
+	logger.L().Info("[client] connected to seed", zap.String("addr", seedAddr))
 
-	// RPC 超时控制
-	rpcCtx, rpcCancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer rpcCancel()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
 
-	cli := pb.NewP2PPeerServiceClient(conn)
-	joinReq := buildJoinReq(node)
+	cli := pb.NewMembershipClient(conn)
+	req := buildHandshakeReq(n)
 
-	log.Printf("[client-debug] Join request: name=%s, uuid=%s, addr=%s:%d",
-		joinReq.NodeInfo.Id.Name, joinReq.NodeInfo.Id.Uuid,
-		joinReq.NodeInfo.Addrs[0].Ip, joinReq.NodeInfo.Addrs[0].Port)
+	logger.L().Debug("[client] handshake request",
+		zap.String("name", req.Self.Id.Name),
+		zap.String("uuid", req.Self.Id.Uuid))
 
-	resp, err := cli.Join(rpcCtx, joinReq)
+	resp, err := cli.Handshake(ctx, req)
 	if err != nil {
-		return nil, fmt.Errorf("call Join RPC failed: %v", err)
+		return nil, fmt.Errorf("call Handshake RPC failed: %w", err)
 	}
 
-	if !resp.Success {
-		return nil, fmt.Errorf("Join failed: %s (code: %d)", resp.Error.Msg, resp.Error.Code)
+	if !resp.Accepted {
+		return nil, fmt.Errorf("handshake rejected: %s", resp.RejectReason)
 	}
 
-	log.Printf("[client] got %d online peers from seed %s", len(resp.Peers), seedAddr)
-	for i, p := range resp.Peers {
-		addrStr := ""
-		if len(p.Addrs) > 0 {
-			addrStr = fmt.Sprintf("%s:%d", p.Addrs[0].Ip, p.Addrs[0].Port)
-		}
-		log.Printf("[client] Peer[%d] name: %s | uuid: %s | addr: %s",
-			i+1, p.Id.Name, p.Id.Uuid, addrStr)
+	logger.L().Info("[client] handshake accepted",
+		zap.Int("known_peers", len(resp.KnownPeers)),
+		zap.String("seed", seedAddr))
+
+	if resp.Peer != nil {
+		n.AddOnlinePeer(resp.Peer)
 	}
 
-	return resp.Peers, nil
+	allPeers := resp.KnownPeers
+	if resp.Peer != nil {
+		allPeers = append(allPeers, resp.Peer)
+	}
+
+	return allPeers, nil
 }
 
-// ConnectToPeers connect to peers in list and save connections
-func ConnectToPeers(node *peer.Node, peers []*pb.NodeInfo) error {
+// ConnectToPeers 连接到 peer 列表中的节点。
+func ConnectToPeers(n PeerNode, peers []*pb.NodeInfo) error {
 	var errMsg string
-	log.Printf("[client] peers to connect: %+v", peers)
+	logger.L().Info("[client] peers to connect", zap.Int("count", len(peers)))
 
-	selfAddr := fmt.Sprintf("%s:%d", node.Cfg().ListenIP, node.Cfg().ListenPort)
+	selfAddr := fmt.Sprintf("%s:%d", n.Cfg().ListenIP, n.Cfg().ListenPort)
 
 	for _, p := range peers {
 		peerUUID := p.Id.Uuid
@@ -70,14 +72,15 @@ func ConnectToPeers(node *peer.Node, peers []*pb.NodeInfo) error {
 			peerAddr = fmt.Sprintf("%s:%d", p.Addrs[0].Ip, p.Addrs[0].Port)
 		}
 
-		log.Printf("[client] process peer: name=%s, uuid=%s, addr=%s", peerName, peerUUID, peerAddr)
+		logger.L().Info("[client] process peer",
+			zap.String("name", peerName), zap.String("uuid", peerUUID), zap.String("addr", peerAddr))
 
 		if peerAddr == selfAddr {
-			log.Printf("skip self connection by addr: %s", peerAddr)
+			logger.L().Info("skip self connection by addr", zap.String("addr", peerAddr))
 			continue
 		}
-		if p.Id.Uuid == node.GetNodeID().Uuid {
-			log.Printf("skip self connection by uuid: %s", peerUUID)
+		if p.Id.Uuid == n.GetNodeID().Uuid {
+			logger.L().Info("skip self connection by uuid", zap.String("uuid", peerUUID))
 			continue
 		}
 
@@ -86,12 +89,12 @@ func ConnectToPeers(node *peer.Node, peers []*pb.NodeInfo) error {
 			continue
 		}
 
-		if err := connectToSinglePeer(node, peerAddr); err != nil {
+		if err := connectToSinglePeer(n, peerAddr); err != nil {
 			errMsg += fmt.Sprintf("connect peer %s(%s) failed: %v; ", peerName, peerAddr, err)
 			continue
 		}
-		node.AddOnlinePeer(p)
-		log.Printf("[client] connect peer %s(%s) success", peerName, peerAddr)
+		n.AddOnlinePeer(p)
+		logger.L().Info("[client] connect peer success", zap.String("name", peerName), zap.String("addr", peerAddr))
 	}
 
 	if errMsg != "" {
@@ -100,110 +103,99 @@ func ConnectToPeers(node *peer.Node, peers []*pb.NodeInfo) error {
 	return nil
 }
 
-func connectToSinglePeer(node *peer.Node, peerAddr string) error {
+func connectToSinglePeer(n ConnPoolManager, peerAddr string) error {
 	conn, err := grpcutil.NewClientConn(context.Background(), peerAddr)
 	if err != nil {
 		return fmt.Errorf("connect failed: %w", err)
 	}
 
-	node.SetPeerConn(peerAddr, conn)
+	n.SetPeerConn(peerAddr, conn)
 
-	stream, err := grpcutil.ConnectPeerStream(context.Background(), conn)
+	cli := pb.NewMessagingClient(conn)
+	stream, err := cli.Stream(context.Background())
 	if err != nil {
-		node.DeletePeerConn(peerAddr)
+		n.DeletePeerConn(peerAddr)
 		conn.Close()
 		return fmt.Errorf("create stream failed: %w", err)
 	}
 
-	node.SetPeerStream(peerAddr, stream)
-	go recvPeerMessageLoop(node, peerAddr, stream)
+	n.SetPeerStream(peerAddr, stream)
+	go recvPeerMessageLoop(n, peerAddr, stream)
 
 	return nil
 }
 
-func buildJoinReq(node *peer.Node) *pb.JoinReq {
-	return &pb.JoinReq{
-		NodeInfo: &pb.NodeInfo{
-			Id: node.GetNodeID(),
-			Addrs: []*pb.NodeAddr{
-				{
-					Ip:       node.Cfg().ListenIP,
-					Port:     node.Cfg().ListenPort,
-					NatType:  pb.NatType_NAT_UNKNOWN,
-					IsPublic: true,
-					Protocol: "tcp",
-				},
-			},
-			Status:            pb.NodeStatus_NODE_STATUS_ONLINE,
-			HeartbeatInterval: types.HeartbeatInterval,
-			Version:           types.DefaultNodeVer,
-			LastActive:        peer.ToPbTimestamp(),
+func buildHandshakeReq(n NodeIdentity) *pb.HandshakeReq {
+	selfInfo := &pb.NodeInfo{
+		Id: n.GetNodeID(),
+		Addrs: []*pb.NodeAddr{
+			{Ip: n.Cfg().ListenIP, Port: n.Cfg().ListenPort},
 		},
-		ProtoVersion: types.DefaultProtoVer,
-		Signature:    []byte{},
+		Status: pb.NodeStatus_ONLINE,
+	}
+	return &pb.HandshakeReq{
+		Self:         selfInfo,
+		ProtoVersion: n.Cfg().ProtoVer,
 	}
 }
 
-func recvPeerMessageLoop(node *peer.Node, peerAddr string, stream pb.P2PPeerService_PeerMessageStreamClient) {
+func recvPeerMessageLoop(n ConnPoolManager, peerAddr string, stream pb.Messaging_StreamClient) {
 	for {
-		msg, err := stream.Recv()
+		env, err := stream.Recv()
 		if err != nil {
-			log.Printf("[client] recv msg from %s failed: %v", peerAddr, err)
-			node.DeletePeerConn(peerAddr)
-			node.DeletePeerStream(peerAddr)
+			logger.L().Warn("[client] recv msg failed", zap.String("addr", peerAddr), zap.Error(err))
+			n.DeletePeerConn(peerAddr)
+			n.DeletePeerStream(peerAddr)
 			return
 		}
 
-		if msg.Type == pb.MessageType_MSG_TEXT {
-			log.Printf("[client] recv from %s: %s", peerAddr, msg.GetText())
+		if textMsg, ok := env.Payload.(*pb.Envelope_Text); ok {
+			logger.L().Info("[client] recv msg",
+				zap.String("addr", peerAddr),
+				zap.String("text", textMsg.Text.Content))
 		}
 	}
 }
 
-func SendTextMessage(node *peer.Node, targetAddr string, content string) error {
-	if err := node.ConnectToPeerStream(targetAddr); err != nil {
-		return err
-	}
-
-	streams := node.GetPeerStreams()
+// SendTextMessage 发送文本消息。
+func SendTextMessage(n PeerNode, targetAddr string, content string) error {
+	streams := n.GetPeerStreams()
 	stream, exists := streams[targetAddr]
 	if !exists {
 		return fmt.Errorf("no stream to %s", targetAddr)
 	}
 
-	msg := &pb.P2PMessage{
-		MsgId:        peer.GenMsgID(),
-		Type:         pb.MessageType_MSG_TEXT,
-		From:         node.GetNodeID(),
-		ProtoVersion: types.DefaultProtoVer,
-		SendTime:     peer.ToPbTimestamp(),
-		Content: &pb.P2PMessage_Text{
-			Text: content,
+	env := &pb.Envelope{
+		MsgId:     generateMsgID(),
+		From:      n.GetNodeID(),
+		Timestamp: uint64(time.Now().UnixMilli()),
+		Payload: &pb.Envelope_Text{
+			Text: &pb.TextMessage{Content: content},
 		},
-		ContentHash: []byte{},
-		Signature:   []byte{},
 	}
 
-	if err := stream.Send(msg); err != nil {
-		return fmt.Errorf("send msg failed: %v", err)
+	if err := stream.Send(env); err != nil {
+		return fmt.Errorf("send msg failed: %w", err)
 	}
 
-	log.Printf("[client] send to %s: %s", targetAddr, content)
+	logger.L().Info("[client] send msg", zap.String("addr", targetAddr), zap.String("content", content))
 	return nil
 }
 
-// JoinAndConnect join seed node and connect to all returned peers
-func JoinAndConnect(node *peer.Node, seedIP string, seedPort uint32) error {
-	seedAddr := fmt.Sprintf("%s:%d", seedIP, seedPort)
-
-	peers, err := JoinSeedNode(seedAddr, node)
+// HandshakeAndConnect 与种子节点握手并连接所有返回的节点。
+func HandshakeAndConnect(n PeerNode, seedAddr string) error {
+	peers, err := HandshakeSeedNode(seedAddr, n)
 	if err != nil {
-		return fmt.Errorf("join seed failed: %v", err)
+		return fmt.Errorf("handshake seed failed: %w", err)
 	}
 
-	if err := ConnectToPeers(node, peers); err != nil {
-		return fmt.Errorf("connect peers failed: %v", err)
+	if err := ConnectToPeers(n, peers); err != nil {
+		return fmt.Errorf("connect peers failed: %w", err)
 	}
 
 	return nil
+}
+
+func generateMsgID() string {
+	return fmt.Sprintf("msg-%d", time.Now().UnixNano())
 }
