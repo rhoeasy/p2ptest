@@ -1,9 +1,9 @@
 # 项目基础配置
 APP_NAME := p2pnode
 BIN_DIR := ./bin
-PROTO_FILE := ./proto/message.proto
-PROTO_OUT := .
-GO_MOD := p2p-demo
+PROTO_FILE := ./proto/p2p.proto
+PROTO_OUT := ./proto
+GO_MOD := p2ptest
 
 # 默认目标：先编译proto，再编译程序
 all: proto build
@@ -11,8 +11,9 @@ all: proto build
 # 编译Protobuf文件（生成pb.go和grpc.pb.go）
 proto:
 	@echo "编译Protobuf文件..."
-	protoc --go_out=$(PROTO_OUT) --go_opt=paths=source_relative \
-		--go-grpc_out=$(PROTO_OUT) --go-grpc_opt=paths=source_relative \
+	mkdir -p $(PROTO_OUT)/p2p
+	protoc --go_out=$(PROTO_OUT)/p2p --go_opt=paths=source_relative \
+		--go-grpc_out=$(PROTO_OUT)/p2p --go-grpc_opt=paths=source_relative \
 		$(PROTO_FILE)
 	@echo "Protobuf编译完成"
 
@@ -27,7 +28,7 @@ build:
 clean:
 	@echo "清理生成文件..."
 	rm -rf $(BIN_DIR)
-	rm -f $(PROTO_OUT)/message.pb.go $(PROTO_OUT)/message_grpc.pb.go
+	rm -f $(PROTO_OUT)/p2p/*.pb.go
 	@echo "清理完成"
 
 # 快速启动种子节点（用Cobra短选项，避免解析错误）

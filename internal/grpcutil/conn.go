@@ -3,7 +3,6 @@ package grpcutil
 import (
 	"context"
 	"fmt"
-	pb "p2ptest/proto"
 	"time"
 
 	"google.golang.org/grpc"
@@ -22,16 +21,13 @@ func NewClientConn(ctx context.Context, addr string) (*grpc.ClientConn, error) {
 		grpc.WithResolvers(resolver.Get("passthrough")),
 	}
 
-	// 现代标准：grpc.NewClient
 	conn, err := grpc.NewClient(addr, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("grpc.NewClient failed: %w", err)
 	}
 
-	// 触发连接
 	conn.Connect()
 
-	// 等待状态从 Idle 变化
 	ok := conn.WaitForStateChange(ctx, connectivity.Idle)
 	if !ok {
 		conn.Close()
@@ -39,22 +35,4 @@ func NewClientConn(ctx context.Context, addr string) (*grpc.ClientConn, error) {
 	}
 
 	return conn, nil
-}
-
-// ConnectPeerStream 建立 PeerMessageStream 双向流
-func ConnectPeerStream(
-	ctx context.Context,
-	conn *grpc.ClientConn,
-) (pb.P2PPeerService_PeerMessageStreamClient, error) {
-	cli := pb.NewP2PPeerServiceClient(conn)
-	return cli.PeerMessageStream(ctx)
-}
-
-// GetPeerClient 直接获取可用的 P2P Client（给 peer 包广播用）
-func GetPeerClient(ctx context.Context, addr string) (pb.P2PPeerServiceClient, *grpc.ClientConn, error) {
-	conn, err := NewClientConn(ctx, addr)
-	if err != nil {
-		return nil, nil, err
-	}
-	return pb.NewP2PPeerServiceClient(conn), conn, nil
 }
