@@ -5,8 +5,10 @@
 *.so
 *.dylib
 # 你的节点可执行文件
-p2pnode
-p2pnode.exe
+/p2pnode
+/p2pnode.exe
+/bin/p2pnode
+/bin/p2pnode.exe
 
 # Go 构建缓存
 /obj
