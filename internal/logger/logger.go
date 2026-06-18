@@ -46,8 +46,7 @@ func RedirectToFile(path string) func() error {
 		return func() error { return nil }
 	}
 
-	var cfg zap.Config
-	cfg = zap.NewProductionConfig()
+	cfg := zap.NewProductionConfig()
 	cfg.EncoderConfig.TimeKey = "time"
 	cfg.EncoderConfig.LevelKey = "level"
 	cfg.EncoderConfig.CallerKey = "caller"
