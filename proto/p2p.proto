@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package p2p;
 
-option go_package = "./proto/p2p/p2p";
+option go_package = "p2ptest/proto/p2p";
 
 // ============================================================
 // 共享内核（Shared Kernel）- 值对象
@@ -11,6 +11,7 @@ option go_package = "./proto/p2p/p2p";
 message NodeID {
   string uuid = 1;
   string name = 2;
+  bytes public_key = 3;  // Ed25519 公钥（32 字节），用于验签
 }
 
 message NodeAddr {
@@ -90,6 +91,7 @@ service Membership {
 message HandshakeReq {
   NodeInfo self = 1;
   uint32 proto_version = 2;
+  bytes signature = 3;  // 对 self.id.uuid 的 Ed25519 签名，证明发起方拥有公钥对应的私钥
 }
 
 message HandshakeResp {
@@ -102,6 +104,7 @@ message HandshakeResp {
 message HeartbeatReq {
   NodeID node_id = 1;
   uint64 timestamp = 2;
+  bytes signature = 3;  // 对 node_id.uuid + timestamp 的 Ed25519 签名
 }
 
 message HeartbeatResp {
@@ -146,6 +149,8 @@ message Envelope {
     Pong pong = 7;
   }
   uint64 timestamp = 6;
+  bytes content_hash = 8;   // SHA256(payload 序列化)，防篡改
+  bytes signature = 9;      // 对 content_hash 的 Ed25519 签名，防伪造
 }
 
 message TextMessage {

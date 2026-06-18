@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync/atomic"
 
+	"p2ptest/internal/crypto"
 	"p2ptest/internal/discovery/domain"
 	"p2ptest/internal/logger"
 	"p2ptest/internal/notifier"
@@ -55,6 +56,17 @@ func (s *MembershipService) Handshake(ctx context.Context, req *pb.HandshakeReq)
 		zap.String("uuid", req.Self.Id.Uuid),
 	)
 
+	// 验签：如果签名存在（新版本客户端），必须验证通过才接受
+	if len(req.Signature) > 0 {
+		if len(req.Self.Id.PublicKey) == 0 {
+			return &pb.HandshakeResp{Accepted: false, RejectReason: "public_key required when signature present"}, nil
+		}
+		if err := crypto.Verify(req.Self.Id.PublicKey, crypto.HandshakeSignData(req.Self.Id.Uuid), req.Signature); err != nil {
+			logger.L().Warn("[membership] handshake signature invalid", zap.String("uuid", req.Self.Id.Uuid))
+			return &pb.HandshakeResp{Accepted: false, RejectReason: "invalid signature"}, nil
+		}
+	}
+
 	// 注册对方到自己的 registry
 	if err := s.registry.Register(req.Self); err != nil {
 		logger.L().Warn("[membership] failed to register peer", zap.Error(err))
@@ -103,6 +115,17 @@ func (s *MembershipService) Heartbeat(ctx context.Context, req *pb.HeartbeatReq)
 		zap.String("node", req.NodeId.Name),
 		zap.String("uuid", req.NodeId.Uuid),
 	)
+
+	// 验签：如果签名存在，必须验证通过
+	if len(req.Signature) > 0 {
+		if len(req.NodeId.PublicKey) == 0 {
+			return &pb.HeartbeatResp{Status: pb.NodeStatus_UNKNOWN}, nil
+		}
+		if err := crypto.Verify(req.NodeId.PublicKey, crypto.HeartbeatSignData(req.NodeId.Uuid, req.Timestamp), req.Signature); err != nil {
+			logger.L().Debug("[membership] heartbeat signature invalid", zap.String("uuid", req.NodeId.Uuid))
+			return &pb.HeartbeatResp{Status: pb.NodeStatus_UNKNOWN}, nil
+		}
+	}
 
 	status := pb.NodeStatus_ONLINE
 	if fn, ok := s.statusGetter.Load().(func() pb.NodeStatus); ok && fn != nil {

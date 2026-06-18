@@ -18,6 +18,7 @@ type PeerNode interface {
 	ConnPoolManager
 	NotifierProvider
 	PingTracker
+	Signer
 }
 
 // NodeIdentity 提供节点身份信息。
@@ -53,4 +54,9 @@ type PingTracker interface {
 // NotifierProvider 提供通知器。
 type NotifierProvider interface {
 	Notifier() *notifier.Notifier
+}
+
+// Signer 提供签名能力，用于给 Handshake/Heartbeat/消息加 Ed25519 签名。
+type Signer interface {
+	Sign(data []byte) []byte
 }

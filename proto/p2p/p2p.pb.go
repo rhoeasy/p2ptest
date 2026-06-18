@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        v3.12.4
-// source: p2p.proto
+// source: proto/p2p.proto
 
 package p2p
 
@@ -57,11 +57,11 @@ func (x NodeStatus) String() string {
 }
 
 func (NodeStatus) Descriptor() protoreflect.EnumDescriptor {
-	return file_p2p_proto_enumTypes[0].Descriptor()
+	return file_proto_p2p_proto_enumTypes[0].Descriptor()
 }
 
 func (NodeStatus) Type() protoreflect.EnumType {
-	return &file_p2p_proto_enumTypes[0]
+	return &file_proto_p2p_proto_enumTypes[0]
 }
 
 func (x NodeStatus) Number() protoreflect.EnumNumber {
@@ -70,20 +70,21 @@ func (x NodeStatus) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use NodeStatus.Descriptor instead.
 func (NodeStatus) EnumDescriptor() ([]byte, []int) {
-	return file_p2p_proto_rawDescGZIP(), []int{0}
+	return file_proto_p2p_proto_rawDescGZIP(), []int{0}
 }
 
 type NodeID struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Uuid          string                 `protobuf:"bytes,1,opt,name=uuid,proto3" json:"uuid,omitempty"`
 	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	PublicKey     []byte                 `protobuf:"bytes,3,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"` // Ed25519 公钥（32 字节），用于验签
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *NodeID) Reset() {
 	*x = NodeID{}
-	mi := &file_p2p_proto_msgTypes[0]
+	mi := &file_proto_p2p_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -95,7 +96,7 @@ func (x *NodeID) String() string {
 func (*NodeID) ProtoMessage() {}
 
 func (x *NodeID) ProtoReflect() protoreflect.Message {
-	mi := &file_p2p_proto_msgTypes[0]
+	mi := &file_proto_p2p_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -108,7 +109,7 @@ func (x *NodeID) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeID.ProtoReflect.Descriptor instead.
 func (*NodeID) Descriptor() ([]byte, []int) {
-	return file_p2p_proto_rawDescGZIP(), []int{0}
+	return file_proto_p2p_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *NodeID) GetUuid() string {
@@ -125,6 +126,13 @@ func (x *NodeID) GetName() string {
 	return ""
 }
 
+func (x *NodeID) GetPublicKey() []byte {
+	if x != nil {
+		return x.PublicKey
+	}
+	return nil
+}
+
 type NodeAddr struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Ip            string                 `protobuf:"bytes,1,opt,name=ip,proto3" json:"ip,omitempty"`
@@ -135,7 +143,7 @@ type NodeAddr struct {
 
 func (x *NodeAddr) Reset() {
 	*x = NodeAddr{}
-	mi := &file_p2p_proto_msgTypes[1]
+	mi := &file_proto_p2p_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -147,7 +155,7 @@ func (x *NodeAddr) String() string {
 func (*NodeAddr) ProtoMessage() {}
 
 func (x *NodeAddr) ProtoReflect() protoreflect.Message {
-	mi := &file_p2p_proto_msgTypes[1]
+	mi := &file_proto_p2p_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -160,7 +168,7 @@ func (x *NodeAddr) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeAddr.ProtoReflect.Descriptor instead.
 func (*NodeAddr) Descriptor() ([]byte, []int) {
-	return file_p2p_proto_rawDescGZIP(), []int{1}
+	return file_proto_p2p_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *NodeAddr) GetIp() string {
@@ -190,7 +198,7 @@ type NodeInfo struct {
 
 func (x *NodeInfo) Reset() {
 	*x = NodeInfo{}
-	mi := &file_p2p_proto_msgTypes[2]
+	mi := &file_proto_p2p_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -202,7 +210,7 @@ func (x *NodeInfo) String() string {
 func (*NodeInfo) ProtoMessage() {}
 
 func (x *NodeInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_p2p_proto_msgTypes[2]
+	mi := &file_proto_p2p_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -215,7 +223,7 @@ func (x *NodeInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeInfo.ProtoReflect.Descriptor instead.
 func (*NodeInfo) Descriptor() ([]byte, []int) {
-	return file_p2p_proto_rawDescGZIP(), []int{2}
+	return file_proto_p2p_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *NodeInfo) GetId() *NodeID {
@@ -255,7 +263,7 @@ type GetPeersReq struct {
 
 func (x *GetPeersReq) Reset() {
 	*x = GetPeersReq{}
-	mi := &file_p2p_proto_msgTypes[3]
+	mi := &file_proto_p2p_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -267,7 +275,7 @@ func (x *GetPeersReq) String() string {
 func (*GetPeersReq) ProtoMessage() {}
 
 func (x *GetPeersReq) ProtoReflect() protoreflect.Message {
-	mi := &file_p2p_proto_msgTypes[3]
+	mi := &file_proto_p2p_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -280,7 +288,7 @@ func (x *GetPeersReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetPeersReq.ProtoReflect.Descriptor instead.
 func (*GetPeersReq) Descriptor() ([]byte, []int) {
-	return file_p2p_proto_rawDescGZIP(), []int{3}
+	return file_proto_p2p_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *GetPeersReq) GetLimit() uint32 {
@@ -299,7 +307,7 @@ type GetPeersResp struct {
 
 func (x *GetPeersResp) Reset() {
 	*x = GetPeersResp{}
-	mi := &file_p2p_proto_msgTypes[4]
+	mi := &file_proto_p2p_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -311,7 +319,7 @@ func (x *GetPeersResp) String() string {
 func (*GetPeersResp) ProtoMessage() {}
 
 func (x *GetPeersResp) ProtoReflect() protoreflect.Message {
-	mi := &file_p2p_proto_msgTypes[4]
+	mi := &file_proto_p2p_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -324,7 +332,7 @@ func (x *GetPeersResp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetPeersResp.ProtoReflect.Descriptor instead.
 func (*GetPeersResp) Descriptor() ([]byte, []int) {
-	return file_p2p_proto_rawDescGZIP(), []int{4}
+	return file_proto_p2p_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *GetPeersResp) GetPeers() []*NodeInfo {
@@ -343,7 +351,7 @@ type FindNodeReq struct {
 
 func (x *FindNodeReq) Reset() {
 	*x = FindNodeReq{}
-	mi := &file_p2p_proto_msgTypes[5]
+	mi := &file_proto_p2p_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -355,7 +363,7 @@ func (x *FindNodeReq) String() string {
 func (*FindNodeReq) ProtoMessage() {}
 
 func (x *FindNodeReq) ProtoReflect() protoreflect.Message {
-	mi := &file_p2p_proto_msgTypes[5]
+	mi := &file_proto_p2p_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -368,7 +376,7 @@ func (x *FindNodeReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FindNodeReq.ProtoReflect.Descriptor instead.
 func (*FindNodeReq) Descriptor() ([]byte, []int) {
-	return file_p2p_proto_rawDescGZIP(), []int{5}
+	return file_proto_p2p_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *FindNodeReq) GetTarget() *NodeID {
@@ -388,7 +396,7 @@ type FindNodeResp struct {
 
 func (x *FindNodeResp) Reset() {
 	*x = FindNodeResp{}
-	mi := &file_p2p_proto_msgTypes[6]
+	mi := &file_proto_p2p_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -400,7 +408,7 @@ func (x *FindNodeResp) String() string {
 func (*FindNodeResp) ProtoMessage() {}
 
 func (x *FindNodeResp) ProtoReflect() protoreflect.Message {
-	mi := &file_p2p_proto_msgTypes[6]
+	mi := &file_proto_p2p_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -413,7 +421,7 @@ func (x *FindNodeResp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FindNodeResp.ProtoReflect.Descriptor instead.
 func (*FindNodeResp) Descriptor() ([]byte, []int) {
-	return file_p2p_proto_rawDescGZIP(), []int{6}
+	return file_proto_p2p_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *FindNodeResp) GetNode() *NodeInfo {
@@ -434,13 +442,14 @@ type HandshakeReq struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Self          *NodeInfo              `protobuf:"bytes,1,opt,name=self,proto3" json:"self,omitempty"`
 	ProtoVersion  uint32                 `protobuf:"varint,2,opt,name=proto_version,json=protoVersion,proto3" json:"proto_version,omitempty"`
+	Signature     []byte                 `protobuf:"bytes,3,opt,name=signature,proto3" json:"signature,omitempty"` // 对 self.id.uuid 的 Ed25519 签名，证明发起方拥有公钥对应的私钥
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *HandshakeReq) Reset() {
 	*x = HandshakeReq{}
-	mi := &file_p2p_proto_msgTypes[7]
+	mi := &file_proto_p2p_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -452,7 +461,7 @@ func (x *HandshakeReq) String() string {
 func (*HandshakeReq) ProtoMessage() {}
 
 func (x *HandshakeReq) ProtoReflect() protoreflect.Message {
-	mi := &file_p2p_proto_msgTypes[7]
+	mi := &file_proto_p2p_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -465,7 +474,7 @@ func (x *HandshakeReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HandshakeReq.ProtoReflect.Descriptor instead.
 func (*HandshakeReq) Descriptor() ([]byte, []int) {
-	return file_p2p_proto_rawDescGZIP(), []int{7}
+	return file_proto_p2p_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *HandshakeReq) GetSelf() *NodeInfo {
@@ -482,6 +491,13 @@ func (x *HandshakeReq) GetProtoVersion() uint32 {
 	return 0
 }
 
+func (x *HandshakeReq) GetSignature() []byte {
+	if x != nil {
+		return x.Signature
+	}
+	return nil
+}
+
 type HandshakeResp struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Peer          *NodeInfo              `protobuf:"bytes,1,opt,name=peer,proto3" json:"peer,omitempty"`                               // 对方的完整信息
@@ -494,7 +510,7 @@ type HandshakeResp struct {
 
 func (x *HandshakeResp) Reset() {
 	*x = HandshakeResp{}
-	mi := &file_p2p_proto_msgTypes[8]
+	mi := &file_proto_p2p_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -506,7 +522,7 @@ func (x *HandshakeResp) String() string {
 func (*HandshakeResp) ProtoMessage() {}
 
 func (x *HandshakeResp) ProtoReflect() protoreflect.Message {
-	mi := &file_p2p_proto_msgTypes[8]
+	mi := &file_proto_p2p_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -519,7 +535,7 @@ func (x *HandshakeResp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HandshakeResp.ProtoReflect.Descriptor instead.
 func (*HandshakeResp) Descriptor() ([]byte, []int) {
-	return file_p2p_proto_rawDescGZIP(), []int{8}
+	return file_proto_p2p_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *HandshakeResp) GetPeer() *NodeInfo {
@@ -554,13 +570,14 @@ type HeartbeatReq struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	NodeId        *NodeID                `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
 	Timestamp     uint64                 `protobuf:"varint,2,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	Signature     []byte                 `protobuf:"bytes,3,opt,name=signature,proto3" json:"signature,omitempty"` // 对 node_id.uuid + timestamp 的 Ed25519 签名
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *HeartbeatReq) Reset() {
 	*x = HeartbeatReq{}
-	mi := &file_p2p_proto_msgTypes[9]
+	mi := &file_proto_p2p_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -572,7 +589,7 @@ func (x *HeartbeatReq) String() string {
 func (*HeartbeatReq) ProtoMessage() {}
 
 func (x *HeartbeatReq) ProtoReflect() protoreflect.Message {
-	mi := &file_p2p_proto_msgTypes[9]
+	mi := &file_proto_p2p_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -585,7 +602,7 @@ func (x *HeartbeatReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeartbeatReq.ProtoReflect.Descriptor instead.
 func (*HeartbeatReq) Descriptor() ([]byte, []int) {
-	return file_p2p_proto_rawDescGZIP(), []int{9}
+	return file_proto_p2p_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *HeartbeatReq) GetNodeId() *NodeID {
@@ -602,6 +619,13 @@ func (x *HeartbeatReq) GetTimestamp() uint64 {
 	return 0
 }
 
+func (x *HeartbeatReq) GetSignature() []byte {
+	if x != nil {
+		return x.Signature
+	}
+	return nil
+}
+
 type HeartbeatResp struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Status        NodeStatus             `protobuf:"varint,1,opt,name=status,proto3,enum=p2p.NodeStatus" json:"status,omitempty"`
@@ -612,7 +636,7 @@ type HeartbeatResp struct {
 
 func (x *HeartbeatResp) Reset() {
 	*x = HeartbeatResp{}
-	mi := &file_p2p_proto_msgTypes[10]
+	mi := &file_proto_p2p_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -624,7 +648,7 @@ func (x *HeartbeatResp) String() string {
 func (*HeartbeatResp) ProtoMessage() {}
 
 func (x *HeartbeatResp) ProtoReflect() protoreflect.Message {
-	mi := &file_p2p_proto_msgTypes[10]
+	mi := &file_proto_p2p_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -637,7 +661,7 @@ func (x *HeartbeatResp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeartbeatResp.ProtoReflect.Descriptor instead.
 func (*HeartbeatResp) Descriptor() ([]byte, []int) {
-	return file_p2p_proto_rawDescGZIP(), []int{10}
+	return file_proto_p2p_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *HeartbeatResp) GetStatus() NodeStatus {
@@ -664,7 +688,7 @@ type DisconnectReq struct {
 
 func (x *DisconnectReq) Reset() {
 	*x = DisconnectReq{}
-	mi := &file_p2p_proto_msgTypes[11]
+	mi := &file_proto_p2p_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -676,7 +700,7 @@ func (x *DisconnectReq) String() string {
 func (*DisconnectReq) ProtoMessage() {}
 
 func (x *DisconnectReq) ProtoReflect() protoreflect.Message {
-	mi := &file_p2p_proto_msgTypes[11]
+	mi := &file_proto_p2p_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -689,7 +713,7 @@ func (x *DisconnectReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DisconnectReq.ProtoReflect.Descriptor instead.
 func (*DisconnectReq) Descriptor() ([]byte, []int) {
-	return file_p2p_proto_rawDescGZIP(), []int{11}
+	return file_proto_p2p_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *DisconnectReq) GetNodeId() *NodeID {
@@ -715,7 +739,7 @@ type DisconnectResp struct {
 
 func (x *DisconnectResp) Reset() {
 	*x = DisconnectResp{}
-	mi := &file_p2p_proto_msgTypes[12]
+	mi := &file_proto_p2p_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -727,7 +751,7 @@ func (x *DisconnectResp) String() string {
 func (*DisconnectResp) ProtoMessage() {}
 
 func (x *DisconnectResp) ProtoReflect() protoreflect.Message {
-	mi := &file_p2p_proto_msgTypes[12]
+	mi := &file_proto_p2p_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -740,7 +764,7 @@ func (x *DisconnectResp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DisconnectResp.ProtoReflect.Descriptor instead.
 func (*DisconnectResp) Descriptor() ([]byte, []int) {
-	return file_p2p_proto_rawDescGZIP(), []int{12}
+	return file_proto_p2p_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *DisconnectResp) GetAcknowledged() bool {
@@ -759,7 +783,7 @@ type NotifyNodeJoinReq struct {
 
 func (x *NotifyNodeJoinReq) Reset() {
 	*x = NotifyNodeJoinReq{}
-	mi := &file_p2p_proto_msgTypes[13]
+	mi := &file_proto_p2p_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -771,7 +795,7 @@ func (x *NotifyNodeJoinReq) String() string {
 func (*NotifyNodeJoinReq) ProtoMessage() {}
 
 func (x *NotifyNodeJoinReq) ProtoReflect() protoreflect.Message {
-	mi := &file_p2p_proto_msgTypes[13]
+	mi := &file_proto_p2p_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -784,7 +808,7 @@ func (x *NotifyNodeJoinReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NotifyNodeJoinReq.ProtoReflect.Descriptor instead.
 func (*NotifyNodeJoinReq) Descriptor() ([]byte, []int) {
-	return file_p2p_proto_rawDescGZIP(), []int{13}
+	return file_proto_p2p_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *NotifyNodeJoinReq) GetNewNode() *NodeInfo {
@@ -803,7 +827,7 @@ type NotifyNodeJoinResp struct {
 
 func (x *NotifyNodeJoinResp) Reset() {
 	*x = NotifyNodeJoinResp{}
-	mi := &file_p2p_proto_msgTypes[14]
+	mi := &file_proto_p2p_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -815,7 +839,7 @@ func (x *NotifyNodeJoinResp) String() string {
 func (*NotifyNodeJoinResp) ProtoMessage() {}
 
 func (x *NotifyNodeJoinResp) ProtoReflect() protoreflect.Message {
-	mi := &file_p2p_proto_msgTypes[14]
+	mi := &file_proto_p2p_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -828,7 +852,7 @@ func (x *NotifyNodeJoinResp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NotifyNodeJoinResp.ProtoReflect.Descriptor instead.
 func (*NotifyNodeJoinResp) Descriptor() ([]byte, []int) {
-	return file_p2p_proto_rawDescGZIP(), []int{14}
+	return file_proto_p2p_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *NotifyNodeJoinResp) GetAcknowledged() bool {
@@ -849,13 +873,15 @@ type Envelope struct {
 	//	*Envelope_Pong
 	Payload       isEnvelope_Payload `protobuf_oneof:"payload"`
 	Timestamp     uint64             `protobuf:"varint,6,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	ContentHash   []byte             `protobuf:"bytes,8,opt,name=content_hash,json=contentHash,proto3" json:"content_hash,omitempty"` // SHA256(payload 序列化)，防篡改
+	Signature     []byte             `protobuf:"bytes,9,opt,name=signature,proto3" json:"signature,omitempty"`                        // 对 content_hash 的 Ed25519 签名，防伪造
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Envelope) Reset() {
 	*x = Envelope{}
-	mi := &file_p2p_proto_msgTypes[15]
+	mi := &file_proto_p2p_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -867,7 +893,7 @@ func (x *Envelope) String() string {
 func (*Envelope) ProtoMessage() {}
 
 func (x *Envelope) ProtoReflect() protoreflect.Message {
-	mi := &file_p2p_proto_msgTypes[15]
+	mi := &file_proto_p2p_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -880,7 +906,7 @@ func (x *Envelope) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Envelope.ProtoReflect.Descriptor instead.
 func (*Envelope) Descriptor() ([]byte, []int) {
-	return file_p2p_proto_rawDescGZIP(), []int{15}
+	return file_proto_p2p_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *Envelope) GetMsgId() string {
@@ -938,6 +964,20 @@ func (x *Envelope) GetTimestamp() uint64 {
 	return 0
 }
 
+func (x *Envelope) GetContentHash() []byte {
+	if x != nil {
+		return x.ContentHash
+	}
+	return nil
+}
+
+func (x *Envelope) GetSignature() []byte {
+	if x != nil {
+		return x.Signature
+	}
+	return nil
+}
+
 type isEnvelope_Payload interface {
 	isEnvelope_Payload()
 }
@@ -969,7 +1009,7 @@ type TextMessage struct {
 
 func (x *TextMessage) Reset() {
 	*x = TextMessage{}
-	mi := &file_p2p_proto_msgTypes[16]
+	mi := &file_proto_p2p_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -981,7 +1021,7 @@ func (x *TextMessage) String() string {
 func (*TextMessage) ProtoMessage() {}
 
 func (x *TextMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_p2p_proto_msgTypes[16]
+	mi := &file_proto_p2p_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -994,7 +1034,7 @@ func (x *TextMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TextMessage.ProtoReflect.Descriptor instead.
 func (*TextMessage) Descriptor() ([]byte, []int) {
-	return file_p2p_proto_rawDescGZIP(), []int{16}
+	return file_proto_p2p_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *TextMessage) GetContent() string {
@@ -1013,7 +1053,7 @@ type Ping struct {
 
 func (x *Ping) Reset() {
 	*x = Ping{}
-	mi := &file_p2p_proto_msgTypes[17]
+	mi := &file_proto_p2p_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1025,7 +1065,7 @@ func (x *Ping) String() string {
 func (*Ping) ProtoMessage() {}
 
 func (x *Ping) ProtoReflect() protoreflect.Message {
-	mi := &file_p2p_proto_msgTypes[17]
+	mi := &file_proto_p2p_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1038,7 +1078,7 @@ func (x *Ping) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Ping.ProtoReflect.Descriptor instead.
 func (*Ping) Descriptor() ([]byte, []int) {
-	return file_p2p_proto_rawDescGZIP(), []int{17}
+	return file_proto_p2p_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *Ping) GetNonce() []byte {
@@ -1058,7 +1098,7 @@ type Pong struct {
 
 func (x *Pong) Reset() {
 	*x = Pong{}
-	mi := &file_p2p_proto_msgTypes[18]
+	mi := &file_proto_p2p_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1070,7 +1110,7 @@ func (x *Pong) String() string {
 func (*Pong) ProtoMessage() {}
 
 func (x *Pong) ProtoReflect() protoreflect.Message {
-	mi := &file_p2p_proto_msgTypes[18]
+	mi := &file_proto_p2p_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1083,7 +1123,7 @@ func (x *Pong) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Pong.ProtoReflect.Descriptor instead.
 func (*Pong) Descriptor() ([]byte, []int) {
-	return file_p2p_proto_rawDescGZIP(), []int{18}
+	return file_proto_p2p_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *Pong) GetNonce() []byte {
@@ -1100,14 +1140,16 @@ func (x *Pong) GetPingTimestamp() uint64 {
 	return 0
 }
 
-var File_p2p_proto protoreflect.FileDescriptor
+var File_proto_p2p_proto protoreflect.FileDescriptor
 
-const file_p2p_proto_rawDesc = "" +
+const file_proto_p2p_proto_rawDesc = "" +
 	"\n" +
-	"\tp2p.proto\x12\x03p2p\"0\n" +
+	"\x0fproto/p2p.proto\x12\x03p2p\"O\n" +
 	"\x06NodeID\x12\x12\n" +
 	"\x04uuid\x18\x01 \x01(\tR\x04uuid\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\".\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1d\n" +
+	"\n" +
+	"public_key\x18\x03 \x01(\fR\tpublicKey\".\n" +
 	"\bNodeAddr\x12\x0e\n" +
 	"\x02ip\x18\x01 \x01(\tR\x02ip\x12\x12\n" +
 	"\x04port\x18\x02 \x01(\rR\x04port\"\x92\x01\n" +
@@ -1124,19 +1166,21 @@ const file_p2p_proto_rawDesc = "" +
 	"\x06target\x18\x01 \x01(\v2\v.p2p.NodeIDR\x06target\"G\n" +
 	"\fFindNodeResp\x12!\n" +
 	"\x04node\x18\x01 \x01(\v2\r.p2p.NodeInfoR\x04node\x12\x14\n" +
-	"\x05found\x18\x02 \x01(\bR\x05found\"V\n" +
+	"\x05found\x18\x02 \x01(\bR\x05found\"t\n" +
 	"\fHandshakeReq\x12!\n" +
 	"\x04self\x18\x01 \x01(\v2\r.p2p.NodeInfoR\x04self\x12#\n" +
-	"\rproto_version\x18\x02 \x01(\rR\fprotoVersion\"\xa3\x01\n" +
+	"\rproto_version\x18\x02 \x01(\rR\fprotoVersion\x12\x1c\n" +
+	"\tsignature\x18\x03 \x01(\fR\tsignature\"\xa3\x01\n" +
 	"\rHandshakeResp\x12!\n" +
 	"\x04peer\x18\x01 \x01(\v2\r.p2p.NodeInfoR\x04peer\x12.\n" +
 	"\vknown_peers\x18\x02 \x03(\v2\r.p2p.NodeInfoR\n" +
 	"knownPeers\x12\x1a\n" +
 	"\baccepted\x18\x03 \x01(\bR\baccepted\x12#\n" +
-	"\rreject_reason\x18\x04 \x01(\tR\frejectReason\"R\n" +
+	"\rreject_reason\x18\x04 \x01(\tR\frejectReason\"p\n" +
 	"\fHeartbeatReq\x12$\n" +
 	"\anode_id\x18\x01 \x01(\v2\v.p2p.NodeIDR\x06nodeId\x12\x1c\n" +
-	"\ttimestamp\x18\x02 \x01(\x04R\ttimestamp\"V\n" +
+	"\ttimestamp\x18\x02 \x01(\x04R\ttimestamp\x12\x1c\n" +
+	"\tsignature\x18\x03 \x01(\fR\tsignature\"V\n" +
 	"\rHeartbeatResp\x12'\n" +
 	"\x06status\x18\x01 \x01(\x0e2\x0f.p2p.NodeStatusR\x06status\x12\x1c\n" +
 	"\ttimestamp\x18\x02 \x01(\x04R\ttimestamp\"M\n" +
@@ -1148,14 +1192,16 @@ const file_p2p_proto_rawDesc = "" +
 	"\x11NotifyNodeJoinReq\x12(\n" +
 	"\bnew_node\x18\x01 \x01(\v2\r.p2p.NodeInfoR\anewNode\"8\n" +
 	"\x12NotifyNodeJoinResp\x12\"\n" +
-	"\facknowledged\x18\x01 \x01(\bR\facknowledged\"\xd5\x01\n" +
+	"\facknowledged\x18\x01 \x01(\bR\facknowledged\"\x96\x02\n" +
 	"\bEnvelope\x12\x15\n" +
 	"\x06msg_id\x18\x01 \x01(\tR\x05msgId\x12\x1f\n" +
 	"\x04from\x18\x02 \x01(\v2\v.p2p.NodeIDR\x04from\x12&\n" +
 	"\x04text\x18\x03 \x01(\v2\x10.p2p.TextMessageH\x00R\x04text\x12\x1f\n" +
 	"\x04ping\x18\x05 \x01(\v2\t.p2p.PingH\x00R\x04ping\x12\x1f\n" +
 	"\x04pong\x18\a \x01(\v2\t.p2p.PongH\x00R\x04pong\x12\x1c\n" +
-	"\ttimestamp\x18\x06 \x01(\x04R\ttimestampB\t\n" +
+	"\ttimestamp\x18\x06 \x01(\x04R\ttimestamp\x12!\n" +
+	"\fcontent_hash\x18\b \x01(\fR\vcontentHash\x12\x1c\n" +
+	"\tsignature\x18\t \x01(\fR\tsignatureB\t\n" +
 	"\apayload\"'\n" +
 	"\vTextMessage\x12\x18\n" +
 	"\acontent\x18\x01 \x01(\tR\acontent\"\x1c\n" +
@@ -1182,23 +1228,23 @@ const file_p2p_proto_rawDesc = "" +
 	"Disconnect\x12\x12.p2p.DisconnectReq\x1a\x13.p2p.DisconnectResp\x12A\n" +
 	"\x0eNotifyNodeJoin\x12\x16.p2p.NotifyNodeJoinReq\x1a\x17.p2p.NotifyNodeJoinResp27\n" +
 	"\tMessaging\x12*\n" +
-	"\x06Stream\x12\r.p2p.Envelope\x1a\r.p2p.Envelope(\x010\x01B\x11Z\x0f./proto/p2p/p2pb\x06proto3"
+	"\x06Stream\x12\r.p2p.Envelope\x1a\r.p2p.Envelope(\x010\x01B\x13Z\x11p2ptest/proto/p2pb\x06proto3"
 
 var (
-	file_p2p_proto_rawDescOnce sync.Once
-	file_p2p_proto_rawDescData []byte
+	file_proto_p2p_proto_rawDescOnce sync.Once
+	file_proto_p2p_proto_rawDescData []byte
 )
 
-func file_p2p_proto_rawDescGZIP() []byte {
-	file_p2p_proto_rawDescOnce.Do(func() {
-		file_p2p_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_p2p_proto_rawDesc), len(file_p2p_proto_rawDesc)))
+func file_proto_p2p_proto_rawDescGZIP() []byte {
+	file_proto_p2p_proto_rawDescOnce.Do(func() {
+		file_proto_p2p_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_proto_p2p_proto_rawDesc), len(file_proto_p2p_proto_rawDesc)))
 	})
-	return file_p2p_proto_rawDescData
+	return file_proto_p2p_proto_rawDescData
 }
 
-var file_p2p_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_p2p_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
-var file_p2p_proto_goTypes = []any{
+var file_proto_p2p_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_proto_p2p_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
+var file_proto_p2p_proto_goTypes = []any{
 	(NodeStatus)(0),            // 0: p2p.NodeStatus
 	(*NodeID)(nil),             // 1: p2p.NodeID
 	(*NodeAddr)(nil),           // 2: p2p.NodeAddr
@@ -1220,7 +1266,7 @@ var file_p2p_proto_goTypes = []any{
 	(*Ping)(nil),               // 18: p2p.Ping
 	(*Pong)(nil),               // 19: p2p.Pong
 }
-var file_p2p_proto_depIdxs = []int32{
+var file_proto_p2p_proto_depIdxs = []int32{
 	1,  // 0: p2p.NodeInfo.id:type_name -> p2p.NodeID
 	2,  // 1: p2p.NodeInfo.addrs:type_name -> p2p.NodeAddr
 	0,  // 2: p2p.NodeInfo.status:type_name -> p2p.NodeStatus
@@ -1259,12 +1305,12 @@ var file_p2p_proto_depIdxs = []int32{
 	0,  // [0:17] is the sub-list for field type_name
 }
 
-func init() { file_p2p_proto_init() }
-func file_p2p_proto_init() {
-	if File_p2p_proto != nil {
+func init() { file_proto_p2p_proto_init() }
+func file_proto_p2p_proto_init() {
+	if File_proto_p2p_proto != nil {
 		return
 	}
-	file_p2p_proto_msgTypes[15].OneofWrappers = []any{
+	file_proto_p2p_proto_msgTypes[15].OneofWrappers = []any{
 		(*Envelope_Text)(nil),
 		(*Envelope_Ping)(nil),
 		(*Envelope_Pong)(nil),
@@ -1273,18 +1319,18 @@ func file_p2p_proto_init() {
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_p2p_proto_rawDesc), len(file_p2p_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_p2p_proto_rawDesc), len(file_proto_p2p_proto_rawDesc)),
 			NumEnums:      1,
 			NumMessages:   19,
 			NumExtensions: 0,
 			NumServices:   3,
 		},
-		GoTypes:           file_p2p_proto_goTypes,
-		DependencyIndexes: file_p2p_proto_depIdxs,
-		EnumInfos:         file_p2p_proto_enumTypes,
-		MessageInfos:      file_p2p_proto_msgTypes,
+		GoTypes:           file_proto_p2p_proto_goTypes,
+		DependencyIndexes: file_proto_p2p_proto_depIdxs,
+		EnumInfos:         file_proto_p2p_proto_enumTypes,
+		MessageInfos:      file_proto_p2p_proto_msgTypes,
 	}.Build()
-	File_p2p_proto = out.File
-	file_p2p_proto_goTypes = nil
-	file_p2p_proto_depIdxs = nil
+	File_proto_p2p_proto = out.File
+	file_proto_p2p_proto_goTypes = nil
+	file_proto_p2p_proto_depIdxs = nil
 }

@@ -2,15 +2,18 @@ package client
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"time"
 
+	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
+
+	"p2ptest/internal/crypto"
 	"p2ptest/internal/grpcutil"
 	"p2ptest/internal/logger"
 	"p2ptest/internal/notifier"
 	pb "p2ptest/proto/p2p"
-
-	"go.uber.org/zap"
 )
 
 // HandshakeSeedNode 与种子节点握手并获取已知节点列表。
@@ -131,7 +134,7 @@ func connectToSinglePeer(n PeerNode, peerAddr, peerName, peerUUID string) error 
 	return nil
 }
 
-func buildHandshakeReq(n NodeIdentity) *pb.HandshakeReq {
+func buildHandshakeReq(n PeerNode) *pb.HandshakeReq {
 	selfInfo := &pb.NodeInfo{
 		Id: n.GetNodeID(),
 		Addrs: []*pb.NodeAddr{
@@ -139,9 +142,11 @@ func buildHandshakeReq(n NodeIdentity) *pb.HandshakeReq {
 		},
 		Status: pb.NodeStatus_ONLINE,
 	}
+	sigData := crypto.HandshakeSignData(n.GetNodeID().Uuid)
 	return &pb.HandshakeReq{
 		Self:         selfInfo,
 		ProtoVersion: n.Cfg().ProtoVer,
+		Signature:    n.Sign(sigData),
 	}
 }
 
@@ -192,13 +197,22 @@ func SendTextMessage(n PeerNode, targetAddr string, content string) error {
 		return fmt.Errorf("no stream to %s", targetAddr)
 	}
 
+	payload := &pb.Envelope_Text{
+		Text: &pb.TextMessage{Content: content},
+	}
+	payloadBytes, err := proto.Marshal(payload.Text)
+	if err != nil {
+		return fmt.Errorf("marshal payload failed: %w", err)
+	}
+	contentHash := sha256.Sum256(payloadBytes)
+
 	env := &pb.Envelope{
-		MsgId:     generateMsgID(),
-		From:      n.GetNodeID(),
-		Timestamp: uint64(time.Now().UnixMilli()),
-		Payload: &pb.Envelope_Text{
-			Text: &pb.TextMessage{Content: content},
-		},
+		MsgId:       generateMsgID(),
+		From:        n.GetNodeID(),
+		Timestamp:   uint64(time.Now().UnixMilli()),
+		Payload:     payload,
+		ContentHash: contentHash[:],
+		Signature:   n.Sign(contentHash[:]),
 	}
 
 	if err := n.SendToStream(targetAddr, env); err != nil {
@@ -216,13 +230,25 @@ func BroadcastTextMessage(n PeerNode, content string) (int, int) {
 	failed := 0
 
 	for _, addr := range addrs {
+		payload := &pb.Envelope_Text{
+			Text: &pb.TextMessage{Content: content},
+		}
+		payloadBytes, err := proto.Marshal(payload.Text)
+		if err != nil {
+			logger.L().Warn("[client] broadcast marshal failed",
+				zap.String("addr", addr), zap.Error(err))
+			failed++
+			continue
+		}
+		contentHash := sha256.Sum256(payloadBytes)
+
 		env := &pb.Envelope{
-			MsgId:     generateMsgID(),
-			From:      n.GetNodeID(),
-			Timestamp: uint64(time.Now().UnixMilli()),
-			Payload: &pb.Envelope_Text{
-				Text: &pb.TextMessage{Content: content},
-			},
+			MsgId:       generateMsgID(),
+			From:        n.GetNodeID(),
+			Timestamp:   uint64(time.Now().UnixMilli()),
+			Payload:     payload,
+			ContentHash: contentHash[:],
+			Signature:   n.Sign(contentHash[:]),
 		}
 
 		if err := n.SendToStream(addr, env); err != nil {

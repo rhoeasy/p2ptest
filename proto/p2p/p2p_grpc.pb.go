@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.1
 // - protoc             v3.12.4
-// source: p2p.proto
+// source: proto/p2p.proto
 
 package p2p
 
@@ -159,7 +159,7 @@ var Discovery_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "p2p.proto",
+	Metadata: "proto/p2p.proto",
 }
 
 const (
@@ -391,7 +391,7 @@ var Membership_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "p2p.proto",
+	Metadata: "proto/p2p.proto",
 }
 
 const (
@@ -491,5 +491,5 @@ var Messaging_ServiceDesc = grpc.ServiceDesc{
 			ClientStreams: true,
 		},
 	},
-	Metadata: "p2p.proto",
+	Metadata: "proto/p2p.proto",
 }

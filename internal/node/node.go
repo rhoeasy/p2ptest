@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"p2ptest/internal/client"
+	"p2ptest/internal/crypto"
 	discoveryApp "p2ptest/internal/discovery/application"
 	discoveryDomain "p2ptest/internal/discovery/domain"
 	"p2ptest/internal/grpcutil"
@@ -34,6 +35,7 @@ type Node struct {
 	registry discoveryDomain.PeerRegistry
 	connPool *transport.ConnPool
 	notifier *notifier.Notifier
+	identity *crypto.Identity  // Ed25519 密钥对，节点加密身份
 
 	discoverySvc  *discoveryApp.DiscoveryService
 	membershipSvc *membershipApp.MembershipService
@@ -55,6 +57,14 @@ type Node struct {
 
 func NewNode(cfg *types.NodeConfig) *Node {
 	selfInfo := buildNodeInfo(cfg)
+
+	// 生成 Ed25519 密钥对，公钥写入 NodeID 用于验签
+	identity, err := crypto.NewIdentity()
+	if err != nil {
+		panic("failed to generate node identity: " + err.Error())
+	}
+	selfInfo.Id.PublicKey = identity.PublicKey()
+
 	stopChan := make(chan struct{})
 	registry := discoveryDomain.NewPeerRegistry(selfInfo.Id.Uuid)
 
@@ -72,6 +82,7 @@ func NewNode(cfg *types.NodeConfig) *Node {
 		registry:          registry,
 		connPool:          transport.NewConnPool(),
 		notifier:          notifier,
+		identity:          identity,
 		discoverySvc:      discoverySvc,
 		membershipSvc:     membershipSvc,
 		messagingSvc:      messagingSvc,
@@ -179,6 +190,11 @@ func (n *Node) sendDisconnectToPeer(p *pb.NodeInfo) {
 
 	cli := pb.NewMembershipClient(conn)
 	_, _ = cli.Disconnect(ctx, &pb.DisconnectReq{NodeId: n.nodeID, Reason: "node stopping"})
+}
+
+// Sign signs data with the node's Ed25519 private key.
+func (n *Node) Sign(data []byte) []byte {
+	return n.identity.Sign(data)
 }
 
 // GetNodeID 获取节点 ID
@@ -435,9 +451,11 @@ func (n *Node) sendHeartbeatToPeer(addr string, uuid string) {
 	}
 
 	cli := pb.NewMembershipClient(conn)
+	ts := uint64(time.Now().UnixMilli())
 	resp, err := cli.Heartbeat(ctx, &pb.HeartbeatReq{
 		NodeId:    n.nodeID,
-		Timestamp: uint64(time.Now().UnixMilli()),
+		Timestamp: ts,
+		Signature: n.identity.Sign(crypto.HeartbeatSignData(n.nodeID.Uuid, ts)),
 	})
 	if err != nil {
 		logger.L().Debug("[node] heartbeat failed", zap.String("addr", addr), zap.Error(err))

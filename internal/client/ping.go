@@ -2,8 +2,11 @@ package client
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"fmt"
 	"time"
+
+	"google.golang.org/protobuf/proto"
 
 	pb "p2ptest/proto/p2p"
 )
@@ -17,13 +20,22 @@ func SendPing(n PeerNode, targetAddr string) (time.Duration, error) {
 
 	nonceKey := string(nonce)
 
+	payload := &pb.Envelope_Ping{
+		Ping: &pb.Ping{Nonce: nonce},
+	}
+	payloadBytes, err := proto.Marshal(payload.Ping)
+	if err != nil {
+		return 0, fmt.Errorf("marshal payload failed: %w", err)
+	}
+	contentHash := sha256.Sum256(payloadBytes)
+
 	env := &pb.Envelope{
-		MsgId:     generateMsgID(),
-		From:      n.GetNodeID(),
-		Timestamp: uint64(time.Now().UnixMilli()),
-		Payload: &pb.Envelope_Ping{
-			Ping: &pb.Ping{Nonce: nonce},
-		},
+		MsgId:       generateMsgID(),
+		From:        n.GetNodeID(),
+		Timestamp:   uint64(time.Now().UnixMilli()),
+		Payload:     payload,
+		ContentHash: contentHash[:],
+		Signature:   n.Sign(contentHash[:]),
 	}
 
 	// Register pending ping and get a channel to wait on

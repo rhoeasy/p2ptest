@@ -91,6 +91,11 @@ func (m *mockPeerNode) HandlePongReceived(nonce string, pingTimestamp uint64) {
 	}
 }
 
+func (m *mockPeerNode) Sign(data []byte) []byte {
+	// Return a dummy 64-byte signature for testing (real Ed25519 not needed in mock)
+	return make([]byte, 64)
+}
+
 func TestBuildHandshakeReq(t *testing.T) {
 	n := newMockPeerNode("test", 50020)
 	req := buildHandshakeReq(n)

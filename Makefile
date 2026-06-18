@@ -12,8 +12,8 @@ all: proto build
 proto:
 	@echo "编译Protobuf文件..."
 	mkdir -p $(PROTO_OUT)/p2p
-	protoc --go_out=$(PROTO_OUT)/p2p --go_opt=paths=source_relative \
-		--go-grpc_out=$(PROTO_OUT)/p2p --go-grpc_opt=paths=source_relative \
+	protoc --go_out=. --go_opt=module=p2ptest \
+		--go-grpc_out=. --go-grpc_opt=module=p2ptest \
 		$(PROTO_FILE)
 	@echo "Protobuf编译完成"
 
