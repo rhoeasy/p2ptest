@@ -7,15 +7,21 @@ import (
 
 	"p2ptest/internal/types"
 	pb "p2ptest/proto/p2p"
+
+	"google.golang.org/protobuf/proto"
 )
 
 // PeerRegistry 定义 peer 注册表的行为
 type PeerRegistry interface {
 	Register(peer *pb.NodeInfo) error
-	Unregister(uuid string) error
+	Unregister(uuid string) (bool, error)
 	Get(uuid string) (*pb.NodeInfo, bool)
+	GetByName(name string) (*pb.NodeInfo, bool)
 	List() []*pb.NodeInfo
 	UpdateLastActive(uuid string)
+	UpdateStatus(uuid string, status pb.NodeStatus) error
+	GetLastActive(uuid string) (time.Time, bool)
+	GetRegisteredAt(uuid string) (time.Time, bool)
 	GetStale(threshold time.Duration) []string
 	GetAddrByName(name string) (string, error)
 }
@@ -24,6 +30,7 @@ type PeerRegistry interface {
 type peerRegistry struct {
 	onlinePeers map[string]*pb.NodeInfo
 	lastActive  map[string]time.Time
+	registeredAt map[string]time.Time
 	nameToAddrs map[string][]string
 	mu          sync.RWMutex
 	selfUUID    string
@@ -34,10 +41,11 @@ var _ PeerRegistry = (*peerRegistry)(nil)
 
 func NewPeerRegistry(selfUUID string) PeerRegistry {
 	return &peerRegistry{
-		onlinePeers: make(map[string]*pb.NodeInfo),
-		lastActive:  make(map[string]time.Time),
-		nameToAddrs: make(map[string][]string),
-		selfUUID:    selfUUID,
+		onlinePeers:  make(map[string]*pb.NodeInfo),
+		lastActive:   make(map[string]time.Time),
+		registeredAt: make(map[string]time.Time),
+		nameToAddrs:  make(map[string][]string),
+		selfUUID:     selfUUID,
 	}
 }
 
@@ -59,6 +67,7 @@ func (r *peerRegistry) Register(peer *pb.NodeInfo) error {
 	r.lastActive[uuid] = time.Now()
 
 	if !exists {
+		r.registeredAt[uuid] = time.Now()
 		addr, err := getPeerFirstAddr(peer)
 		if err == nil {
 			r.addNameAddrUnlocked(peer.Id.Name, addr)
@@ -68,28 +77,57 @@ func (r *peerRegistry) Register(peer *pb.NodeInfo) error {
 	return nil
 }
 
-func (r *peerRegistry) Unregister(uuid string) error {
+func (r *peerRegistry) Unregister(uuid string) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	peer, ok := r.onlinePeers[uuid]
 	if !ok {
-		return types.ErrPeerNotFound
+		return false, nil
 	}
 
 	r.cleanNameAddrUnlocked(peer)
 
 	delete(r.onlinePeers, uuid)
 	delete(r.lastActive, uuid)
+	delete(r.registeredAt, uuid)
 
-	return nil
+	return true, nil
 }
 
 func (r *peerRegistry) Get(uuid string) (*pb.NodeInfo, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	p, ok := r.onlinePeers[uuid]
-	return p, ok
+	if !ok {
+		return nil, false
+	}
+	return proto.Clone(p).(*pb.NodeInfo), true
+}
+
+func (r *peerRegistry) GetByName(name string) (*pb.NodeInfo, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, p := range r.onlinePeers {
+		if p.Id.Name == name {
+			return proto.Clone(p).(*pb.NodeInfo), true
+		}
+	}
+	return nil, false
+}
+
+func (r *peerRegistry) GetLastActive(uuid string) (time.Time, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	t, ok := r.lastActive[uuid]
+	return t, ok
+}
+
+func (r *peerRegistry) GetRegisteredAt(uuid string) (time.Time, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	t, ok := r.registeredAt[uuid]
+	return t, ok
 }
 
 func (r *peerRegistry) List() []*pb.NodeInfo {
@@ -98,7 +136,7 @@ func (r *peerRegistry) List() []*pb.NodeInfo {
 
 	peers := make([]*pb.NodeInfo, 0, len(r.onlinePeers))
 	for _, p := range r.onlinePeers {
-		peers = append(peers, p)
+		peers = append(peers, proto.Clone(p).(*pb.NodeInfo))
 	}
 	return peers
 }
@@ -109,6 +147,17 @@ func (r *peerRegistry) UpdateLastActive(uuid string) {
 	if _, exists := r.onlinePeers[uuid]; exists {
 		r.lastActive[uuid] = time.Now()
 	}
+}
+
+func (r *peerRegistry) UpdateStatus(uuid string, status pb.NodeStatus) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	peer, exists := r.onlinePeers[uuid]
+	if !exists {
+		return types.ErrPeerNotFound
+	}
+	peer.Status = status
+	return nil
 }
 
 func (r *peerRegistry) GetStale(threshold time.Duration) []string {

@@ -31,12 +31,12 @@ func (m *mockRegistry) Register(peer *pb.NodeInfo) error {
 	return nil
 }
 
-func (m *mockRegistry) Unregister(uuid string) error {
+func (m *mockRegistry) Unregister(uuid string) (bool, error) {
 	if _, ok := m.peers[uuid]; !ok {
-		return types.ErrPeerNotFound
+		return false, nil
 	}
 	delete(m.peers, uuid)
-	return nil
+	return true, nil
 }
 
 func (m *mockRegistry) Get(uuid string) (*pb.NodeInfo, bool) {
@@ -54,10 +54,29 @@ func (m *mockRegistry) List() []*pb.NodeInfo {
 
 func (m *mockRegistry) UpdateLastActive(uuid string) {}
 
+func (m *mockRegistry) UpdateStatus(uuid string, status pb.NodeStatus) error { return nil }
+
 func (m *mockRegistry) GetStale(threshold time.Duration) []string { return nil }
 
 func (m *mockRegistry) GetAddrByName(name string) (string, error) {
 	return "", types.ErrPeerNotFound
+}
+
+func (m *mockRegistry) GetByName(name string) (*pb.NodeInfo, bool) {
+	for _, p := range m.peers {
+		if p.Id.Name == name {
+			return p, true
+		}
+	}
+	return nil, false
+}
+
+func (m *mockRegistry) GetLastActive(uuid string) (time.Time, bool) {
+	return time.Time{}, false
+}
+
+func (m *mockRegistry) GetRegisteredAt(uuid string) (time.Time, bool) {
+	return time.Time{}, false
 }
 
 func TestDiscoveryService_GetPeers(t *testing.T) {
