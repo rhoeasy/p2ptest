@@ -1,27 +1,53 @@
 package logger
 
 import (
+	"os"
+	"sync"
+
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
 
-// 全局单例 logger
-var globalLogger *zap.Logger
+var (
+	globalLogger *zap.Logger
+	once         sync.Once
+)
 
-// InitLogger 初始化日志（在 main.go 最开头调用一次）
-// isDev: true=开发模式(彩色、控制台、带调用栈)，false=生产模式(JSON)
 func InitLogger(isDev bool) {
-	var cfg zap.Config
-	if isDev {
-		// 开发环境：人类友好、彩色、打印行号
-		cfg = zap.NewDevelopmentConfig()
-		cfg.EncoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
-	} else {
-		// 生产环境：结构化 JSON、高性能、适合日志收集
-		cfg = zap.NewProductionConfig()
+	once.Do(func() {
+		var cfg zap.Config
+		if isDev {
+			cfg = zap.NewDevelopmentConfig()
+			cfg.EncoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
+		} else {
+			cfg = zap.NewProductionConfig()
+		}
+
+		cfg.EncoderConfig.TimeKey = "time"
+		cfg.EncoderConfig.LevelKey = "level"
+		cfg.EncoderConfig.CallerKey = "caller"
+		cfg.EncoderConfig.MessageKey = "msg"
+		cfg.EncoderConfig.StacktraceKey = "stack"
+		cfg.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+
+		var err error
+		globalLogger, err = cfg.Build(zap.AddCallerSkip(1))
+		if err != nil {
+			panic("logger init failed: " + err.Error())
+		}
+
+		zap.ReplaceGlobals(globalLogger)
+	})
+}
+
+func RedirectToFile(path string) func() error {
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return func() error { return nil }
 	}
 
-	// 统一日志字段格式
+	var cfg zap.Config
+	cfg = zap.NewProductionConfig()
 	cfg.EncoderConfig.TimeKey = "time"
 	cfg.EncoderConfig.LevelKey = "level"
 	cfg.EncoderConfig.CallerKey = "caller"
@@ -29,17 +55,22 @@ func InitLogger(isDev bool) {
 	cfg.EncoderConfig.StacktraceKey = "stack"
 	cfg.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
 
-	var err error
-	globalLogger, err = cfg.Build(zap.AddCallerSkip(1))
-	if err != nil {
-		panic("logger init failed: " + err.Error())
-	}
+	writer := zapcore.AddSync(file)
+	fileCore := zapcore.NewCore(
+		zapcore.NewJSONEncoder(cfg.EncoderConfig),
+		writer,
+		zap.DebugLevel,
+	)
 
-	// 替换 zap 全局 logger，支持 zap.L() 直接使用
+	globalLogger = zap.New(fileCore, zap.AddCallerSkip(1))
 	zap.ReplaceGlobals(globalLogger)
+
+	return func() error {
+		_ = globalLogger.Sync()
+		return file.Close()
+	}
 }
 
-// L 获取全局 Logger（所有包都用这个方法拿日志实例）
 func L() *zap.Logger {
 	if globalLogger == nil {
 		panic("logger not initialized, please call logger.InitLogger() first")
