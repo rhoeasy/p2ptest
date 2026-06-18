@@ -1,10 +1,11 @@
 package application
 
 import (
-	"fmt"
 	"io"
+	"time"
 
 	"p2ptest/internal/logger"
+	"p2ptest/internal/notifier"
 	pb "p2ptest/proto/p2p"
 
 	"go.uber.org/zap"
@@ -16,10 +17,15 @@ import (
 // 职责：处理业务消息的双向流。
 type MessagingService struct {
 	pb.UnimplementedMessagingServer
+	selfInfo *pb.NodeInfo
+	notifier *notifier.Notifier
 }
 
-func NewMessagingService() *MessagingService {
-	return &MessagingService{}
+func NewMessagingService(selfInfo *pb.NodeInfo, notifier *notifier.Notifier) *MessagingService {
+	return &MessagingService{
+		selfInfo: selfInfo,
+		notifier: notifier,
+	}
 }
 
 func (s *MessagingService) Stream(stream pb.Messaging_StreamServer) error {
@@ -54,21 +60,28 @@ func (s *MessagingService) handleEnvelope(stream pb.Messaging_StreamServer, env 
 			zap.String("content", payload.Text.Content),
 		)
 
-		reply := &pb.Envelope{
-			MsgId:     env.MsgId + "-ack",
-			From:      &pb.NodeID{Name: "server", Uuid: "server"},
-			Timestamp: env.Timestamp,
-			Payload: &pb.Envelope_Text{
-				Text: &pb.TextMessage{Content: fmt.Sprintf("received: %s", payload.Text.Content)},
-			},
-		}
-
-		if err := stream.Send(reply); err != nil {
-			logger.L().Error("[messaging] send reply failed", zap.Error(err))
+		// Emit notification for received message
+		if s.notifier != nil {
+			s.notifier.Emit(notifier.NewMessageReceivedNotification(env.From.Name, payload.Text.Content))
 		}
 
 	case *pb.Envelope_Ping:
 		logger.L().Debug("[messaging] received ping", zap.String("from", env.From.Name))
+
+		pongEnv := &pb.Envelope{
+			MsgId:     env.MsgId + "-pong",
+			From:      s.selfInfo.Id,
+			Timestamp: uint64(time.Now().UnixMilli()),
+			Payload: &pb.Envelope_Pong{
+				Pong: &pb.Pong{
+					Nonce:         payload.Ping.Nonce,
+					PingTimestamp: env.Timestamp,
+				},
+			},
+		}
+		if err := stream.Send(pongEnv); err != nil {
+			logger.L().Warn("[messaging] send pong failed", zap.Error(err))
+		}
 
 	default:
 		logger.L().Warn("[messaging] unknown payload type", zap.String("from", env.From.Name))
