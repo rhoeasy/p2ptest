@@ -13,8 +13,9 @@ type NodeConfig struct {
 
 // 通用常量（避免魔法值）
 const (
-	HeartbeatInterval = 5000 // 心跳间隔（毫秒）
-	DefaultProtoVer   = 1    // 默认协议版本
+	HeartbeatInterval = 5000  // 心跳间隔（毫秒）
+	GossipInterval    = 30000 // Gossip 间隔（毫秒）
+	DefaultProtoVer   = 1     // 默认协议版本
 
 	HeartbeatTimeout = 30 * time.Second
 	CleanInterval    = 5 * time.Second
