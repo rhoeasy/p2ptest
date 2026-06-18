@@ -63,7 +63,11 @@ func (r *peerRegistry) Register(peer *pb.NodeInfo) error {
 	uuid := peer.Id.Uuid
 	exists := r.onlinePeers[uuid] != nil
 
-	r.onlinePeers[uuid] = peer
+	// Clone on write so the registry never aliases the caller's pointer.
+	// Get/List already clone on read; this makes the write side symmetric and
+	// prevents shared-state bugs if the caller mutates its *pb.NodeInfo after
+	// registering.
+	r.onlinePeers[uuid] = proto.Clone(peer).(*pb.NodeInfo)
 	r.lastActive[uuid] = time.Now()
 
 	if !exists {
