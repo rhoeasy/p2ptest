@@ -171,7 +171,7 @@ func (n *Node) sendDisconnectToPeer(p *pb.NodeInfo) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
-	conn, err := grpc.DialContext(ctx, addr, grpc.WithInsecure())
+	conn, err := grpcutil.NewClientConn(ctx, addr)
 	if err != nil {
 		return
 	}
