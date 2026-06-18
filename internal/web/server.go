@@ -3,12 +3,16 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"net"
 	"net/http"
 	"sync"
 	"time"
 
+	"p2ptest/internal/logger"
 	"p2ptest/internal/notifier"
 	"github.com/gorilla/websocket"
+	"go.uber.org/zap"
 )
 
 type PeerInfoProvider interface {
@@ -109,13 +113,21 @@ func (s *Server) handleGetPeers(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) Start() error {
+	// Bind synchronously so bind failures (port in use, bad address) surface
+	// to the caller instead of being swallowed by a background goroutine.
+	ln, err := net.Listen("tcp", s.addr)
+	if err != nil {
+		return fmt.Errorf("web server listen %s failed: %w", s.addr, err)
+	}
+
 	s.httpServer = &http.Server{
-		Addr:    s.addr,
 		Handler: s.mux,
 	}
 
 	go func() {
-		s.httpServer.ListenAndServe()
+		if err := s.httpServer.Serve(ln); err != nil && err != http.ErrServerClosed {
+			logger.L().Warn("[web] server stopped", zap.String("addr", s.addr), zap.Error(err))
+		}
 	}()
 
 	return nil
