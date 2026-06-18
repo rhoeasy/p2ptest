@@ -190,6 +190,42 @@ make test
 - **无加密**: gRPC 使用 insecure 传输
 - **无服务发现**: 依赖手动指定 --peer-ip/--peer-port
 
+## Phase 1 待办（p2ptest-enhanced）
+
+> 来源：`web3-career-development/AGENTS.md` Phase 1 Project 1 + 本轮 DDD 重构后的遗漏项
+
+### P1-A 加密与签名（对应"无加密"限制）★★★
+
+原始设计（doubaoseed2.0 旧 proto `web3-career-development/projects/p2ptest/proto/message.proto`）预留了 Ed25519 签名字段但从未实现，DDD 重构时 proto 被重写，签名字段全部丢失。Phase 1 需找回并落地。
+
+- [ ] **Ed25519 节点身份密钥对**：每个节点启动时生成或加载 `ed25519.PrivateKey`，公钥写入 `NodeInfo`（proto 需加 `bytes public_key` 字段）
+- [ ] **Handshake 请求签名验签**：`HandshakeReq` 加 `bytes signature` 字段，发起方用私钥对 `Self` 内容签名，接收方验证签名后才注册——防伪造 Join
+- [ ] **心跳签名验签**：`HeartbeatReq` 加 `bytes signature`，防伪造心跳
+- [ ] **消息内容签名验签**：`Envelope` 加 `bytes content_hash + bytes signature`，防篡改/Poison 消息
+- [ ] **gRPC 传输层 TLS**：用节点公钥自签证书或 mTLS 替换 `insecure.NewCredentials()`，覆盖 transport 层加密（当前 `grpcutil/conn.go` 和 `node.go:sendDisconnectToPeer` 均为明文）
+- [ ] **错误码恢复**：proto 加 `ERR_SIGN_INVALID` 错误码，验签失败返回明确错误
+
+**Why Ed25519**: Solana 同款签名算法（`ed25519-dalek` / Go `crypto/ed25519`），一石二鸟——学了加密也复习了 Solana 账户模型的非对称密钥基础。对照 `phase-0/README.md` "认证鉴权 → 钱包签名验证" 那一行。
+
+**TDD 提示**: 遵循 mattpocock 垂直切片。第一个 RED：`TestHandshakeRejectsUnsignedRequest`——验签失败返回 `Accepted=false`。GREEN：加 proto 字段 + 验签逻辑。逐个 RPC 循环。签名验证是纯函数，走 deep module 抽法（参考 `parseHostPort`）。
+
+### P1-B 架构可视化与文档
+
+- [ ] **架构图**: 画一张节点内部架构图（三限界上下文 + notifier 事件总线 + 协调器 Node），SVG 落 `docs/architecture.svg`
+- [ ] **README 重写**: 加架构图引用、"Solana relevance"段落（对照 phase-0 README 简历策略）
+- [ ] **GitHub Actions CI/CD**
+
+### P1-C 集成测试与 CI
+
+- [ ] **3 节点集成测试**: 起三个真节点，验证 Handshake → 广播 → 消息互发的端到端流程（参考 AGENTS.md 重构教训里强调的"重构前先写端到端测试"）
+- [ ] **go test -race 入 CI**: 本轮已本地验证 race 全绿，需固化到 CI
+
+### P1-D Phase 2 候选方向（未定，需要你拍板）
+
+- [ ] DHT 路由（`client.FindNode` 当前是 dead code，CONTEXT.md 标记为未来 DHT 基础设施）
+- [ ] NAT 穿透（旧 proto 有 `NatType` 枚举，当前未实现）
+- [ ] 持久化 peer 列表（对应"无持久化"限制）
+
 ## 重构经验教训（2026-06-13）
 
 ### 错误：知识流失（Knowledge Loss）
