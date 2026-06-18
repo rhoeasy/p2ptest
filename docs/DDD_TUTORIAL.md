@@ -719,11 +719,141 @@ mattpocock 的原则：**只在系统边界 mock**（外部 API、DB、时间、
 
 ---
 
+## 15. 收尾实战：Ed25519 签名落地（P1-A 闭环）
+
+本章是对"项目收尾"的记录。签名是 P1-A 的全部内容，也是 p2ptest 从"学习透镜"升级为"原设计意图完整兑现"的标志。它把 DDD、TDD、横切关注点、deep module 全串在一起——你照着这章读代码，会发现前面 14 章的概念都在这一个 feature 里用上了。
+
+### 15.1 为什么 Ed25519 是"一石二鸟"的选择
+
+AGENTS.md 的 P1-A 小节写明了选 Ed25519 的理由：Solana 同款签名算法。这不是凑巧——Ed25519 的 Go 标准库实现（`crypto/ed25519`）和 Rust 的 `ed25519-dalek` 是同一套曲线（Curve25519），API 几乎一一对应。你在 p2ptest 里学会的 sign/verify 模式，到 Solana 里写钱包验证时直接复用。
+
+对照 phase-0 README 的"一石二鸟"表："认证鉴权 → 钱包签名验证"这一行，现在落地了。
+
+### 15.2 crypto 包：教科书级 deep module
+
+`internal/crypto/crypto.go` 只有 77 行，但它是一个完美的 deep module：
+
+```
+小接口（对外 3 个入口）：
+  NewIdentity() → *Identity           生成密钥对
+  (*Identity).Sign(data) → []byte     签名
+  Verify(pk, data, sig) → error       验签
+
+深实现（藏在内）：
+  crypto/ed25519 标准库
+  密钥生成、签名、验证的完整密码学
+  HandshakeSignData / HeartbeatSignData 辅助函数（定义签名内容）
+```
+
+调用方（Membership/Messaging/Node/client）只需要知道"Sign 传数据拿签名、Verify 传公钥+数据+签名验真"——完全不需要知道 Curve25519 是什么。如果哪天换算法（比如上 BLS 聚合签名），只改 crypto 包内部，外部零改动。
+
+这正是第 10 章"deep module"概念的真实应用：**小接口藏大坑——这里藏的是密码学。**
+
+### 15.3 签名注入：三层防线
+
+签名不是一道墙，是三层独立验证——每层保护不同的信任假设：
+
+**层 1：Handshake 签名**（membership/service.go）
+- 发起方 client 调 `n.Sign(HandshakeSignData(uuid))` 签名
+- 接收方 membership 验签后才注册——**防伪造 Join**
+- 验签失败返回 `Accepted=false, RejectReason: "invalid signature"`
+
+**层 2：Heartbeat 签名**（node.go 签名 + membership 验签）
+- Node 心跳循环调 `identity.Sign(HeartbeatSignData(uuid, timestamp))`
+- 接收方 membership 验签——**防伪造心跳 + 防重放**（timestamp 绑定）
+- 验签失败返回 `UNKNOWN` 状态
+
+**层 3：Envelope 签名**（client 签名 + messaging 验签）
+- client 计算 `SHA256(proto.Marshal(payload))` 得 content_hash，再 `n.Sign(content_hash)` 签名
+- 接收方 messaging 先验 content_hash（防篡改），再验签名（防伪造）——**防篡改 + 防 Poison 消息**
+- 验签失败静默丢弃
+
+### 15.4 向后兼容策略：宽松验签
+
+一个关键的设计决策——**验签只在签名存在时做**。看 membership 的 Handshake 验签：
+
+```go
+// service.go —— 宽松验签
+if len(req.Signature) > 0 {        // 有签名才验
+    if crypto.Verify(...) != nil {  // 验不过才拒
+        return rejected
+    }
+}
+// 无签名 → 照常处理（向后兼容旧客户端）
+```
+
+Messaging 也一样：
+
+```go
+// service.go verifyEnvelope
+if len(env.Signature) == 0 || ... {
+    return true   // 无签名 → 放行
+}
+```
+
+为什么这么做？因为 p2ptest 是学习项目，不会强制所有节点同时升级。这样设计后：旧节点（无签名）和新节点（有签名）能共存，新节点之间的通信受签名保护，旧节点之间不受保护但不报错。
+
+**这是"渐进式安全升级"的标准模式**——生产级系统从明文切 TLS 时也这么干（insecure + TLS 双栈过渡期）。
+
+### 15.5 TDD 的第一个 RED
+
+按 mattpocock 垂直切片，签名的第一个 RED 是 `TestIdentitySignAndVerify`：
+
+```go
+// crypto_test.go —— tracer bullet
+func TestIdentitySignAndVerify(t *testing.T) {
+    alice, err := NewIdentity()
+    // ...
+    sig := alice.Sign(data)
+    if err := Verify(alice.PublicKey(), data, sig); err != nil {
+        t.Errorf("Verify failed for valid signature: %v", err)
+    }
+}
+```
+
+编译失败（`NewIdentity` / `Verify` 不存在）→ 实现 77 行 crypto.go → GREEN。然后追加三个测试：篡改数据被拒、错误公钥被拒、公钥稳定——每个都是行为测试，不碰实现细节。
+
+`crypto_test.go` 全部 4 个测试用真实 Ed25519 密钥对，零 mock。因为密码学验证天然是纯函数行为：输入确定、输出确定、无副作用——是 deep module 的理想测试对象。
+
+### 15.6 架构图
+
+`docs/architecture.html` 是一张交互式架构图（浏览器打开），用深色主题可视化整个系统：
+
+- **绿色**（Backend）：三个限界上下文（Discovery / Membership / Messaging）+ domain.PeerRegistry 聚合根
+- **橙色**（Event Bus）：notifier + Emit/Subscribe 箭头（事件流）
+- **玫红**（Security）：crypto.Identity + Verify 箭头（签名验签流）
+- **紫色**（Aggregate Root）：PeerRegistry
+- **青色**（Frontend）：CLI/Web 通过 Provider 接口注入
+- **灰虚线框**：Bounded Contexts 边界 + 共享基础设施（ConnPool）
+
+图里能看到第 7 章讲的三件事：
+1. 三上下文不互相 import（各自独立绿色块）
+2. 事件总线（橙色箭头）连接所有上下文和前端
+3. Node 既是协调器（顶部）又是 crypto 的持有者，签名向下注入各层
+
+### 15.7 这一章串联的概念
+
+| 概念 | 在签名实现里的体现 | 对应教程章节 |
+|------|-------------------|-------------|
+| Deep module | crypto 包: 3 方法藏密码学 | 第 10 章 |
+| 聚合根 | PeerRegistry 存公钥用于验签 | 第 3 章 |
+| 限界上下文 | 验签逻辑各 context 独立实现 | 第 4 章 |
+| 横切关注点 | crypto 独立成包，所有上下文共享 | 第 6 章 |
+| 领域事件 | 签名后的消息触发 message_received | 第 7 章 |
+| 依赖倒置 | client 通过 Signer 接口调 Node.Sign | 第 8 章 |
+| 防御对称 | 签名方 Sign + 验签方 Verify 对称 | 第 9 章 |
+| 垂直切片 TDD | TestIdentitySignAndVerify 是 tracer bullet | 第 11 章 |
+| 向后兼容 | 宽松验签策略 | 新概念 |
+
+签名不是孤立功能——它是前面 14 章所有概念的综合应用。读懂这一章，就读懂了整个教程。
+
+---
+
 ## 结语
 
 DDD 不是一套目录模板，是一种**看系统的方式**：先看名词，再看边界，最后才填动词。
 TDD 不是写测试的运动，是一种**改代码的纪律**：先写一个会失败的测试证明问题存在，再让它过，再重构。
 
-这个项目花了一个 God Struct、一次丢功能、五次 TDD 修复，才走到现在。每一步都能在 `git log` 里看到。把它当一面镜子：你下一个系统的第一版会不会有边界债？演化时能不能用测试守护？抽横切包时有没有写出身证明？
+这个项目花了一个 God Struct、一次丢功能、五次 TDD 修复、一次 Ed25519 签名收尾，才走到现在。每一步都能在 `git log` 里看到。把它当一面镜子：你下一个系统的第一版会不会有边界债？演化时能不能用测试守护？抽横切包时有没有写出身证明？安全功能能不能用 deep module 藏复杂度？
 
 带着这些问题去看代码，比看任何概念书都有用。不懂的章节，随时问我。
