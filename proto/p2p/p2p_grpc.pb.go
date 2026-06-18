@@ -163,9 +163,10 @@ var Discovery_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	Membership_Handshake_FullMethodName  = "/p2p.Membership/Handshake"
-	Membership_Heartbeat_FullMethodName  = "/p2p.Membership/Heartbeat"
-	Membership_Disconnect_FullMethodName = "/p2p.Membership/Disconnect"
+	Membership_Handshake_FullMethodName      = "/p2p.Membership/Handshake"
+	Membership_Heartbeat_FullMethodName      = "/p2p.Membership/Heartbeat"
+	Membership_Disconnect_FullMethodName     = "/p2p.Membership/Disconnect"
+	Membership_NotifyNodeJoin_FullMethodName = "/p2p.Membership/NotifyNodeJoin"
 )
 
 // MembershipClient is the client API for Membership service.
@@ -181,6 +182,9 @@ type MembershipClient interface {
 	// 断开：优雅终止对等关系
 	// 语义清晰："我要断开与你的连接"，而不是模糊的"Leave"
 	Disconnect(ctx context.Context, in *DisconnectReq, opts ...grpc.CallOption) (*DisconnectResp, error)
+	// 通知：告诉对方有新节点加入
+	// 由已有节点在收到新节点 Handshake 后，向其他已连接节点发出
+	NotifyNodeJoin(ctx context.Context, in *NotifyNodeJoinReq, opts ...grpc.CallOption) (*NotifyNodeJoinResp, error)
 }
 
 type membershipClient struct {
@@ -221,6 +225,16 @@ func (c *membershipClient) Disconnect(ctx context.Context, in *DisconnectReq, op
 	return out, nil
 }
 
+func (c *membershipClient) NotifyNodeJoin(ctx context.Context, in *NotifyNodeJoinReq, opts ...grpc.CallOption) (*NotifyNodeJoinResp, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(NotifyNodeJoinResp)
+	err := c.cc.Invoke(ctx, Membership_NotifyNodeJoin_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // MembershipServer is the server API for Membership service.
 // All implementations must embed UnimplementedMembershipServer
 // for forward compatibility.
@@ -234,6 +248,9 @@ type MembershipServer interface {
 	// 断开：优雅终止对等关系
 	// 语义清晰："我要断开与你的连接"，而不是模糊的"Leave"
 	Disconnect(context.Context, *DisconnectReq) (*DisconnectResp, error)
+	// 通知：告诉对方有新节点加入
+	// 由已有节点在收到新节点 Handshake 后，向其他已连接节点发出
+	NotifyNodeJoin(context.Context, *NotifyNodeJoinReq) (*NotifyNodeJoinResp, error)
 	mustEmbedUnimplementedMembershipServer()
 }
 
@@ -252,6 +269,9 @@ func (UnimplementedMembershipServer) Heartbeat(context.Context, *HeartbeatReq) (
 }
 func (UnimplementedMembershipServer) Disconnect(context.Context, *DisconnectReq) (*DisconnectResp, error) {
 	return nil, status.Error(codes.Unimplemented, "method Disconnect not implemented")
+}
+func (UnimplementedMembershipServer) NotifyNodeJoin(context.Context, *NotifyNodeJoinReq) (*NotifyNodeJoinResp, error) {
+	return nil, status.Error(codes.Unimplemented, "method NotifyNodeJoin not implemented")
 }
 func (UnimplementedMembershipServer) mustEmbedUnimplementedMembershipServer() {}
 func (UnimplementedMembershipServer) testEmbeddedByValue()                    {}
@@ -328,6 +348,24 @@ func _Membership_Disconnect_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Membership_NotifyNodeJoin_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(NotifyNodeJoinReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MembershipServer).NotifyNodeJoin(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Membership_NotifyNodeJoin_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MembershipServer).NotifyNodeJoin(ctx, req.(*NotifyNodeJoinReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Membership_ServiceDesc is the grpc.ServiceDesc for Membership service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -346,6 +384,10 @@ var Membership_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Disconnect",
 			Handler:    _Membership_Disconnect_Handler,
+		},
+		{
+			MethodName: "NotifyNodeJoin",
+			Handler:    _Membership_NotifyNodeJoin_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

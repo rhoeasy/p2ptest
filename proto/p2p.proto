@@ -81,6 +81,10 @@ service Membership {
   // 断开：优雅终止对等关系
   // 语义清晰："我要断开与你的连接"，而不是模糊的"Leave"
   rpc Disconnect(DisconnectReq) returns (DisconnectResp);
+
+  // 通知：告诉对方有新节点加入
+  // 由已有节点在收到新节点 Handshake 后，向其他已连接节点发出
+  rpc NotifyNodeJoin(NotifyNodeJoinReq) returns (NotifyNodeJoinResp);
 }
 
 message HandshakeReq {
@@ -114,6 +118,14 @@ message DisconnectResp {
   bool acknowledged = 1;
 }
 
+message NotifyNodeJoinReq {
+  NodeInfo new_node = 1;
+}
+
+message NotifyNodeJoinResp {
+  bool acknowledged = 1;
+}
+
 // ============================================================
 // 限界上下文 3: Messaging（消息传递）
 // 职责：业务消息的路由和传输
@@ -130,8 +142,8 @@ message Envelope {
   NodeID from = 2;
   oneof payload {
     TextMessage text = 3;
-    FileChunk file = 4;
     Ping ping = 5;
+    Pong pong = 7;
   }
   uint64 timestamp = 6;
 }
@@ -140,13 +152,11 @@ message TextMessage {
   string content = 1;
 }
 
-message FileChunk {
-  string file_id = 1;
-  bytes data = 2;
-  uint32 index = 3;
-  bool is_last = 4;
-}
-
 message Ping {
   bytes nonce = 1;
+}
+
+message Pong {
+  bytes nonce = 1;
+  uint64 ping_timestamp = 2;
 }
