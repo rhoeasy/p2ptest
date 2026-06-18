@@ -17,7 +17,6 @@ import (
 	"p2ptest/internal/types"
 	pb "p2ptest/proto/p2p"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -513,9 +512,14 @@ func (n *Node) broadcastNodeJoin(notif notifier.Notification) {
 		return
 	}
 
+	host, port, ok := parseHostPort(addr)
+	if !ok {
+		return
+	}
+
 	newNodeInfo := &pb.NodeInfo{
 		Id:    &pb.NodeID{Uuid: peerUUID, Name: peerName},
-		Addrs: []*pb.NodeAddr{{Ip: addr[:strings.LastIndex(addr, ":")], Port: uint32(mustParsePort(addr))}},
+		Addrs: []*pb.NodeAddr{{Ip: host, Port: port}},
 	}
 
 	peers := n.registry.List()
@@ -550,13 +554,20 @@ func (n *Node) notifySinglePeerJoin(peerAddr string, newNodeInfo *pb.NodeInfo) {
 	}
 }
 
-func mustParsePort(addr string) int {
-	_, portStr, err := net.SplitHostPort(addr)
+// parseHostPort splits a "host:port" address into its parts.
+// It never panics: any malformed input returns ok=false. This replaces the
+// panic-prone addr[:strings.LastIndex(addr, ":")] idiom and the mustParsePort
+// helper that silently returned 0 on error.
+func parseHostPort(addr string) (host string, port uint32, ok bool) {
+	h, pStr, err := net.SplitHostPort(addr)
 	if err != nil {
-		return 0
+		return "", 0, false
 	}
-	p, _ := strconv.Atoi(portStr)
-	return p
+	p, err := strconv.Atoi(pStr)
+	if err != nil || p < 0 {
+		return "", 0, false
+	}
+	return h, uint32(p), true
 }
 
 func buildNodeInfo(cfg *types.NodeConfig) *pb.NodeInfo {
