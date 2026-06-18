@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"p2ptest/internal/node"
 	"p2ptest/internal/types"
 )
 
@@ -20,13 +21,22 @@ func TestTwoNodesCanExchangeMessages(t *testing.T) {
 	seedCtx, seedCancel := context.WithCancel(context.Background())
 	defer seedCancel()
 
+	seedReady := make(chan struct{})
+	seedApp.onNodeStarted = func(n *node.Node) {
+		close(seedReady)
+	}
+
 	seedDone := make(chan error, 1)
 	go func() {
 		seedDone <- seedApp.Run(seedCtx)
 	}()
 
-	// 等待 seed 启动
-	time.Sleep(100 * time.Millisecond)
+	// 等待 seed 启动（通过回调信号）
+	select {
+	case <-seedReady:
+	case <-time.After(2 * time.Second):
+		t.Fatal("seed did not start in time")
+	}
 
 	// 启动 node2，连接到 seed
 	node2Cfg := &types.NodeConfig{
@@ -39,12 +49,24 @@ func TestTwoNodesCanExchangeMessages(t *testing.T) {
 	node2Ctx, node2Cancel := context.WithCancel(context.Background())
 	defer node2Cancel()
 
+	node2Ready := make(chan struct{})
+	node2App.onNodeStarted = func(n *node.Node) {
+		close(node2Ready)
+	}
+
 	node2Done := make(chan error, 1)
 	go func() {
 		node2Done <- node2App.Run(node2Ctx)
 	}()
 
-	// 等待 node2 连接完成
+	// 等待 node2 启动
+	select {
+	case <-node2Ready:
+	case <-time.After(2 * time.Second):
+		t.Fatal("node2 did not start in time")
+	}
+
+	// 等待连接建立完成
 	time.Sleep(200 * time.Millisecond)
 
 	// 验证 node2 可以看到 seed

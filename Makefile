@@ -33,17 +33,17 @@ clean:
 
 # 快速启动种子节点（用Cobra短选项，避免解析错误）
 run-seed: build
-	@echo "启动种子节点（端口50051）..."
-	$(BIN_DIR)/$(APP_NAME) -n seed -i 127.0.0.1 -p 50051 -d
+	@echo "启动种子节点（端口50051，Web面板:8081）..."
+	$(BIN_DIR)/$(APP_NAME) -n seed -i 127.0.0.1 -p 50051 -d --web :8081
 
 # 快速启动node2节点（连接种子节点，短+长选项结合）
 run-node2: build
-	@echo "启动node2节点（端口50052，连接种子节点）..."
-	$(BIN_DIR)/$(APP_NAME) -n node2 -i 127.0.0.1 -p 50052 --peer-ip 127.0.0.1 --peer-port 50051
+	@echo "启动node2节点（端口50052，Web面板:8082，连接种子节点）..."
+	$(BIN_DIR)/$(APP_NAME) -n node2 -i 127.0.0.1 -p 50052 --peer-ip 127.0.0.1 --peer-port 50051 --web :8082
 
 run-node3: build
-	@echo "启动node3节点（端口50053，连接种子节点）..."
-	$(BIN_DIR)/$(APP_NAME) -n node3 -i 127.0.0.1 -p 50053 --peer-ip 127.0.0.1 --peer-port 50051
+	@echo "启动node3节点（端口50053，Web面板:8083，连接种子节点）..."
+	$(BIN_DIR)/$(APP_NAME) -n node3 -i 127.0.0.1 -p 50053 --peer-ip 127.0.0.1 --peer-port 50051 --web :8083
 
 # 单元测试
 test:

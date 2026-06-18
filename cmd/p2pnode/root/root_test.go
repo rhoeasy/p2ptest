@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"p2ptest/internal/node"
 	"p2ptest/internal/types"
 )
 
@@ -60,7 +61,13 @@ func TestAppRunInitializesNode(t *testing.T) {
 
 	app := NewApp(cfg)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	// Use a channel to safely receive the node reference
+	nodeReady := make(chan struct{})
+	app.onNodeStarted = func(n *node.Node) {
+		close(nodeReady)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -68,7 +75,13 @@ func TestAppRunInitializesNode(t *testing.T) {
 		done <- app.Run(ctx)
 	}()
 
-	time.Sleep(50 * time.Millisecond)
+	// Wait for the node to be initialized (signaled via callback)
+	select {
+	case <-nodeReady:
+		// Node is ready — safe to access app.P2PNode
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for node to start")
+	}
 
 	if app.P2PNode == nil {
 		t.Fatal("app.P2PNode should be initialized after Run")
@@ -88,7 +101,7 @@ func TestAppRunWithPprof(t *testing.T) {
 
 	app := NewApp(cfg, WithPprof("127.0.0.1:16060"))
 
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
 	done := make(chan error, 1)
