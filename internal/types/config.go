@@ -13,11 +13,13 @@ type NodeConfig struct {
 
 // 通用常量（避免魔法值）
 const (
-	HeartbeatInterval = 5000 // 心跳间隔（毫秒）
-	DefaultProtoVer   = 1    // 默认协议版本
+	// 间隔统一用 time.Duration，避免"裸毫秒 int 当 Duration 用"的语义陷阱。
+	// 调用方可直接赋值给 time.Duration 字段，无需手动换算。
+	HeartbeatInterval = 5 * time.Second
+	GossipInterval    = 30 * time.Second
+	HeartbeatTimeout  = 30 * time.Second
+	CleanInterval     = 5 * time.Second
 
-	HeartbeatTimeout = 30 * time.Second
-	CleanInterval    = 5 * time.Second
-
-	DefaultNodeVer string = "v0.1.0"
+	DefaultProtoVer = 1            // 默认协议版本
+	DefaultNodeVer  string = "v0.1.0"
 )

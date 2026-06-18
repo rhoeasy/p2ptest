@@ -1,0 +1,58 @@
+# Go 编译产物
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+# 你的节点可执行文件
+/p2pnode
+/p2pnode.exe
+/bin/p2pnode
+/bin/p2pnode.exe
+
+# Go 构建缓存
+/obj
+/bin
+/build
+/out
+*.test
+*.prof
+# pprof 生成的分析文件
+*.pprof
+profile.out
+
+# Go 测试覆盖率报告
+coverage.out
+
+# 依赖目录
+/vendor/
+/Gopkg.lock
+/go.sum
+
+# 日志文件
+*.log
+*.tmp
+*.temp
+logs/
+log/
+
+# IDE 配置
+.idea/
+*.iws
+*.iml
+*.ipr
+.vscode/
+*.swp
+*.swo
+
+# OpenCode 内部目录
+.omo/
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 临时调试文件
+debug/
+tmp/
+temp/
