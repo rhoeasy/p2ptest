@@ -76,9 +76,9 @@ func NewNode(cfg *types.NodeConfig) *Node {
 		membershipSvc:     membershipSvc,
 		messagingSvc:      messagingSvc,
 		stopChan:          stopChan,
-		heartbeatInterval: time.Duration(types.HeartbeatInterval) * time.Millisecond,
+		heartbeatInterval: types.HeartbeatInterval,
 		cleanInterval:     types.CleanInterval,
-		gossipInterval:    time.Duration(types.GossipInterval) * time.Millisecond,
+		gossipInterval:    types.GossipInterval,
 		pendingPings:      make(map[string]chan time.Duration),
 	}
 
