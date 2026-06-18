@@ -2,30 +2,45 @@ package application
 
 import (
 	"context"
+	"fmt"
+	"sync/atomic"
 
 	"p2ptest/internal/discovery/domain"
 	"p2ptest/internal/logger"
+	"p2ptest/internal/notifier"
 	"p2ptest/internal/types"
 	pb "p2ptest/proto/p2p"
 
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 )
 
 // MembershipService 实现 gRPC Membership 服务接口。
 // 职责：管理节点间的对等关系（握手、心跳、断开）。
 type MembershipService struct {
 	pb.UnimplementedMembershipServer
-	registry domain.PeerRegistry
-	selfInfo *pb.NodeInfo
-	cfg      *types.NodeConfig
+	registry     domain.PeerRegistry
+	selfInfo     *pb.NodeInfo
+	cfg          *types.NodeConfig
+	notifier     *notifier.Notifier
+	statusGetter atomic.Value // stores func() pb.NodeStatus
 }
 
-func NewMembershipService(registry domain.PeerRegistry, selfInfo *pb.NodeInfo, cfg *types.NodeConfig) *MembershipService {
-	return &MembershipService{
+func NewMembershipService(registry domain.PeerRegistry, selfInfo *pb.NodeInfo, cfg *types.NodeConfig, notifier *notifier.Notifier) *MembershipService {
+	svc := &MembershipService{
 		registry: registry,
 		selfInfo: selfInfo,
 		cfg:      cfg,
+		notifier: notifier,
 	}
+	if selfInfo != nil {
+		svc.statusGetter.Store(func() pb.NodeStatus { return pb.NodeStatus_ONLINE })
+	}
+	return svc
+}
+
+func (s *MembershipService) SetStatusGetter(fn func() pb.NodeStatus) {
+	s.statusGetter.Store(fn)
 }
 
 // Handshake 处理握手请求。
@@ -54,8 +69,22 @@ func (s *MembershipService) Handshake(ctx context.Context, req *pb.HandshakeReq)
 	// 返回自己的信息 + 已知节点列表
 	knownPeers := s.registry.List()
 
+	if s.notifier != nil {
+		peerAddr := ""
+		if len(req.Self.Addrs) > 0 {
+			peerAddr = fmt.Sprintf("%s:%d", req.Self.Addrs[0].Ip, req.Self.Addrs[0].Port)
+		}
+		s.notifier.Emit(notifier.NewPeerOnlineNotification(req.Self.Id.Name, peerAddr))
+
+		if len(knownPeers) > 0 {
+			s.notifier.Emit(notifier.NewPeerDiscoveredNotification(
+				req.Self.Id.Name, peerAddr, req.Self.Id.Uuid,
+			))
+		}
+	}
+
 	return &pb.HandshakeResp{
-		Peer:       s.selfInfo,
+		Peer:       proto.Clone(s.selfInfo).(*pb.NodeInfo),
 		KnownPeers: knownPeers,
 		Accepted:   true,
 	}, nil
@@ -75,32 +104,77 @@ func (s *MembershipService) Heartbeat(ctx context.Context, req *pb.HeartbeatReq)
 		zap.String("uuid", req.NodeId.Uuid),
 	)
 
+	status := pb.NodeStatus_ONLINE
+	if fn, ok := s.statusGetter.Load().(func() pb.NodeStatus); ok && fn != nil {
+		status = fn()
+	}
+
 	return &pb.HeartbeatResp{
-		Status:    pb.NodeStatus_ONLINE,
+		Status:    status,
 		Timestamp: req.Timestamp,
 	}, nil
 }
 
 // Disconnect 处理断开请求。
-// 语义：接收方注销发起方，确认断开。
+// 语义：接收方将发起方状态设为 OFFLINE，然后注销，确认断开。
 func (s *MembershipService) Disconnect(ctx context.Context, req *pb.DisconnectReq) (*pb.DisconnectResp, error) {
 	if req == nil || req.NodeId == nil || req.NodeId.Uuid == "" {
 		return &pb.DisconnectResp{Acknowledged: true}, nil
 	}
 
-	if err := s.registry.Unregister(req.NodeId.Uuid); err != nil {
-		logger.L().Warn("[membership] failed to unregister peer", zap.Error(err))
+	if _, exists := s.registry.Get(req.NodeId.Uuid); exists {
+		_ = s.registry.UpdateStatus(req.NodeId.Uuid, pb.NodeStatus_OFFLINE)
 	}
 
-	logger.L().Info("[membership] node disconnected",
-		zap.String("name", req.NodeId.Name),
-		zap.String("uuid", req.NodeId.Uuid),
-		zap.String("reason", req.Reason),
-	)
+	if removed, _ := s.registry.Unregister(req.NodeId.Uuid); removed {
+		logger.L().Info("[membership] node disconnected",
+			zap.String("name", req.NodeId.Name),
+			zap.String("uuid", req.NodeId.Uuid),
+			zap.String("reason", req.Reason),
+		)
+
+		if s.notifier != nil {
+			s.notifier.Emit(notifier.NewPeerOfflineNotification(req.NodeId.Name, req.Reason))
+		}
+	}
 
 	return &pb.DisconnectResp{Acknowledged: true}, nil
 }
 
-func (s *MembershipService) Registry() domain.PeerRegistry {
-	return s.registry
+func (s *MembershipService) NotifyNodeJoin(ctx context.Context, req *pb.NotifyNodeJoinReq) (*pb.NotifyNodeJoinResp, error) {
+	if req == nil || req.NewNode == nil || req.NewNode.Id == nil || req.NewNode.Id.Uuid == "" {
+		return &pb.NotifyNodeJoinResp{Acknowledged: true}, nil
+	}
+
+	if req.NewNode.Id.Uuid == s.selfInfo.Id.Uuid {
+		return &pb.NotifyNodeJoinResp{Acknowledged: true}, nil
+	}
+
+	if _, exists := s.registry.Get(req.NewNode.Id.Uuid); exists {
+		s.registry.UpdateLastActive(req.NewNode.Id.Uuid)
+		return &pb.NotifyNodeJoinResp{Acknowledged: true}, nil
+	}
+
+	if err := s.registry.Register(req.NewNode); err != nil {
+		logger.L().Warn("[membership] notify-node-join register failed", zap.Error(err))
+		return &pb.NotifyNodeJoinResp{Acknowledged: false}, nil
+	}
+
+	peerAddr := ""
+	if len(req.NewNode.Addrs) > 0 {
+		peerAddr = fmt.Sprintf("%s:%d", req.NewNode.Addrs[0].Ip, req.NewNode.Addrs[0].Port)
+	}
+
+	logger.L().Info("[membership] notified of new node",
+		zap.String("node_name", req.NewNode.Id.Name),
+		zap.String("addr", peerAddr),
+	)
+
+	if s.notifier != nil {
+		s.notifier.Emit(notifier.NewPeerDiscoveredNotification(
+			req.NewNode.Id.Name, peerAddr, req.NewNode.Id.Uuid,
+		))
+	}
+
+	return &pb.NotifyNodeJoinResp{Acknowledged: true}, nil
 }
