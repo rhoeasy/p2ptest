@@ -7,6 +7,7 @@ import (
 
 	"p2ptest/internal/grpcutil"
 	"p2ptest/internal/logger"
+	"p2ptest/internal/notifier"
 	pb "p2ptest/proto/p2p"
 
 	"go.uber.org/zap"
@@ -89,7 +90,7 @@ func ConnectToPeers(n PeerNode, peers []*pb.NodeInfo) error {
 			continue
 		}
 
-		if err := connectToSinglePeer(n, peerAddr); err != nil {
+		if err := connectToSinglePeer(n, peerAddr, peerName, peerUUID); err != nil {
 			errMsg += fmt.Sprintf("connect peer %s(%s) failed: %v; ", peerName, peerAddr, err)
 			continue
 		}
@@ -103,7 +104,12 @@ func ConnectToPeers(n PeerNode, peers []*pb.NodeInfo) error {
 	return nil
 }
 
-func connectToSinglePeer(n ConnPoolManager, peerAddr string) error {
+func connectToSinglePeer(n PeerNode, peerAddr, peerName, peerUUID string) error {
+	if n.HasStream(peerAddr) {
+		logger.L().Info("[client] already connected, skipping", zap.String("addr", peerAddr))
+		return nil
+	}
+
 	conn, err := grpcutil.NewClientConn(context.Background(), peerAddr)
 	if err != nil {
 		return fmt.Errorf("connect failed: %w", err)
@@ -120,7 +126,7 @@ func connectToSinglePeer(n ConnPoolManager, peerAddr string) error {
 	}
 
 	n.SetPeerStream(peerAddr, stream)
-	go recvPeerMessageLoop(n, peerAddr, stream)
+	go recvPeerMessageLoop(n, peerAddr, peerName, peerUUID, stream)
 
 	return nil
 }
@@ -139,11 +145,19 @@ func buildHandshakeReq(n NodeIdentity) *pb.HandshakeReq {
 	}
 }
 
-func recvPeerMessageLoop(n ConnPoolManager, peerAddr string, stream pb.Messaging_StreamClient) {
+func recvPeerMessageLoop(n PeerNode, peerAddr, peerName, peerUUID string, stream pb.Messaging_StreamClient) {
 	for {
 		env, err := stream.Recv()
 		if err != nil {
-			logger.L().Warn("[client] recv msg failed", zap.String("addr", peerAddr), zap.Error(err))
+			logger.L().Warn("[client] recv msg failed, peer disconnected",
+				zap.String("name", peerName), zap.String("addr", peerAddr), zap.Error(err))
+
+			if removed, _ := n.RemoveOnlinePeer(peerUUID); removed {
+				if ntfr := n.Notifier(); ntfr != nil {
+					ntfr.Emit(notifier.NewPeerOfflineNotification(peerName, "stream disconnected"))
+				}
+			}
+
 			n.DeletePeerConn(peerAddr)
 			n.DeletePeerStream(peerAddr)
 			return
@@ -151,17 +165,30 @@ func recvPeerMessageLoop(n ConnPoolManager, peerAddr string, stream pb.Messaging
 
 		if textMsg, ok := env.Payload.(*pb.Envelope_Text); ok {
 			logger.L().Info("[client] recv msg",
+				zap.String("name", peerName),
 				zap.String("addr", peerAddr),
 				zap.String("text", textMsg.Text.Content))
+
+			// Emit notification with peer name (not IP:port)
+			if ntfr := n.Notifier(); ntfr != nil {
+				ntfr.Emit(notifier.NewMessageReceivedNotification(peerName, textMsg.Text.Content))
+			}
+		}
+
+		if pongMsg, ok := env.Payload.(*pb.Envelope_Pong); ok {
+			if env.From != nil {
+				logger.L().Debug("[client] recv pong", zap.String("name", env.From.Name))
+			}
+			if pong := pongMsg.Pong; pong != nil {
+				n.HandlePongReceived(string(pong.Nonce), pong.PingTimestamp)
+			}
 		}
 	}
 }
 
 // SendTextMessage 发送文本消息。
 func SendTextMessage(n PeerNode, targetAddr string, content string) error {
-	streams := n.GetPeerStreams()
-	stream, exists := streams[targetAddr]
-	if !exists {
+	if !n.HasStream(targetAddr) {
 		return fmt.Errorf("no stream to %s", targetAddr)
 	}
 
@@ -174,12 +201,42 @@ func SendTextMessage(n PeerNode, targetAddr string, content string) error {
 		},
 	}
 
-	if err := stream.Send(env); err != nil {
+	if err := n.SendToStream(targetAddr, env); err != nil {
 		return fmt.Errorf("send msg failed: %w", err)
 	}
 
 	logger.L().Info("[client] send msg", zap.String("addr", targetAddr), zap.String("content", content))
 	return nil
+}
+
+// BroadcastTextMessage 向所有在线 peer 广播文本消息，返回成功数和失败数。
+func BroadcastTextMessage(n PeerNode, content string) (int, int) {
+	addrs := n.StreamAddrs()
+	success := 0
+	failed := 0
+
+	for _, addr := range addrs {
+		env := &pb.Envelope{
+			MsgId:     generateMsgID(),
+			From:      n.GetNodeID(),
+			Timestamp: uint64(time.Now().UnixMilli()),
+			Payload: &pb.Envelope_Text{
+				Text: &pb.TextMessage{Content: content},
+			},
+		}
+
+		if err := n.SendToStream(addr, env); err != nil {
+			logger.L().Warn("[client] broadcast failed",
+				zap.String("addr", addr), zap.Error(err))
+			failed++
+		} else {
+			success++
+			logger.L().Info("[client] broadcast sent",
+				zap.String("addr", addr), zap.String("content", content))
+		}
+	}
+
+	return success, failed
 }
 
 // HandshakeAndConnect 与种子节点握手并连接所有返回的节点。
